@@ -1,0 +1,5 @@
+#!/bin/sh
+# What is about to be committed is checked for what is private. A hook that
+# cannot run stops the commit too: unchecked is not clean.
+cd "$(git rev-parse --show-toplevel)" || exit 1
+exec python3 -I tools/check_private.py --staged

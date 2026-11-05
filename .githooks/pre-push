@@ -1,0 +1,5 @@
+#!/bin/sh
+# The last stop before the public repository: every commit, also one made
+# around the pre-commit hook.
+cd "$(git rev-parse --show-toplevel)" || exit 1
+exec python3 -I tools/check_private.py --history

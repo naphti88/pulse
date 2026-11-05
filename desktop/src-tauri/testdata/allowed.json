@@ -1,0 +1,36 @@
+{
+  "keys": [
+    "ageMs", "process", "pending", "tool", "agent", "expect", "state", "stage", "rule", "lines",
+    "type", "subtype", "timestamp", "isSidechain", "isMeta", "message", "stop_reason", "content",
+    "text", "id", "name", "input", "tool_use_id", "is_error", "run_in_background", "task_id"
+  ],
+  "values": [
+    "user", "assistant", "system", "attachment", "last-prompt", "custom-title", "pr-link", "mode",
+    "queue-operation", "file-history-snapshot", "other",
+    "stop_hook_summary", "turn_duration", "api_error", "compact_boundary", "informational", "local_command",
+    "end_turn", "tool_use", "max_tokens", "stop_sequence", "refusal", "pause_turn",
+    "text", "tool_result", "thinking",
+    "AskUserQuestion", "ExitPlanMode", "Read", "Edit", "Write", "MultiEdit", "NotebookEdit", "Bash", "PowerShell",
+    "Agent", "Workflow", "Monitor", "TaskStop", "WebFetch", "WebSearch", "ToolSearch", "Skill", "SendMessage",
+    "mcp__server__tool", "OtherTool",
+    "…", "[Request interrupted by user]", "<bash-input>…", "<local-command-stdout>…", "<command-name>…",
+    "running", "blocked", "waiting", "review", "quiet", "background",
+    "open", "follow", "parked", "done",
+    "question_in_turn", "approval_pending", "approval_guess", "turn_open", "background_work", "record_open",
+    "said_waiting", "said_blocked", "said_idle", "said_result", "app_refused", "app_asks", "nothing_known",
+    "run_found_nothing", "result",
+    "found_nothing", "marked_done", "result_seen", "result_read", "later"
+  ],
+  "templates": [
+    "t{n}", "wf_t{n}",
+    "2026-{n}-{n}T{n}:{n}:{n}.{n}Z",
+    "…\nSTATUS: idle | …", "…\nSTATUS: worked | …", "…\nSTATUS: waiting | …", "…\nSTATUS: blocked | …", "…\nSTATUS: parked | …",
+    "running in background with ID: t{n}",
+    "Workflow Task ID: wf_t{n}",
+    "Monitor started (task t{n}",
+    "<task-notification><task-id>t{n}</task-id><status>completed</status></task-notification>",
+    "<task-notification><task-id>t{n}</task-id><status>failed</status></task-notification>",
+    "<task-notification><task-id>t{n}</task-id><status>killed</status></task-notification>",
+    "<task-notification><task-id>t{n}</task-id><status>stopped</status></task-notification>"
+  ]
+}

@@ -2,3 +2,8 @@
 .DS_Store
 # what Claude Code keeps for this folder on this Mac (local settings, approvals)
 .claude/
+# never in git, whatever folder they land in (tools/check_private.py stops them too)
+*.jsonl
+captures/
+.env
+.env.*

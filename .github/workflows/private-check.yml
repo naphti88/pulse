@@ -1,0 +1,22 @@
+# What got past the hooks on a Mac (a clone without them, --no-verify). It runs
+# after a push, so it can only raise the alarm: the hooks are what prevents.
+name: Private check
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Tracked files
+        run: python3 -I tools/check_private.py --all
+      - name: History
+        run: python3 -I tools/check_private.py --history
