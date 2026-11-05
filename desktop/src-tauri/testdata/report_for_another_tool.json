@@ -1,0 +1,199 @@
+{
+  "ageMs": 3000.0,
+  "expect": {
+    "rule": "turn_open",
+    "stage": "running",
+    "state": "running"
+  },
+  "lines": [
+    {
+      "message": {
+        "content": "…"
+      },
+      "timestamp": "2026-01-01T00:00:00.000Z",
+      "type": "user"
+    },
+    {
+      "timestamp": "2026-01-01T00:00:00.000Z",
+      "type": "attachment"
+    },
+    {
+      "timestamp": "2026-01-01T00:00:00.000Z",
+      "type": "attachment"
+    },
+    {
+      "timestamp": "2026-01-01T00:00:00.000Z",
+      "type": "attachment"
+    },
+    {
+      "timestamp": "2026-01-01T00:00:00.000Z",
+      "type": "attachment"
+    },
+    {
+      "timestamp": "2026-01-01T00:00:00.000Z",
+      "type": "attachment"
+    },
+    {
+      "timestamp": "2026-01-01T00:00:00.000Z",
+      "type": "attachment"
+    },
+    {
+      "timestamp": "2026-01-01T00:00:00.000Z",
+      "type": "attachment"
+    },
+    {
+      "timestamp": "2026-01-01T00:00:00.000Z",
+      "type": "attachment"
+    },
+    {
+      "timestamp": "2026-01-01T00:00:00.005Z",
+      "type": "attachment"
+    },
+    {
+      "type": "last-prompt"
+    },
+    {
+      "type": "other"
+    },
+    {
+      "type": "other"
+    },
+    {
+      "type": "file-history-snapshot"
+    },
+    {
+      "type": "other"
+    },
+    {
+      "timestamp": "2026-01-01T00:00:00.020Z",
+      "type": "attachment"
+    },
+    {
+      "timestamp": "2026-01-01T00:00:00.021Z",
+      "type": "attachment"
+    },
+    {
+      "timestamp": "2026-01-01T00:00:00.021Z",
+      "type": "attachment"
+    },
+    {
+      "timestamp": "2026-01-01T00:00:00.022Z",
+      "type": "attachment"
+    },
+    {
+      "timestamp": "2026-01-01T00:00:00.023Z",
+      "type": "attachment"
+    },
+    {
+      "type": "last-prompt"
+    },
+    {
+      "type": "other"
+    },
+    {
+      "type": "other"
+    },
+    {
+      "type": "other"
+    },
+    {
+      "type": "custom-title"
+    },
+    {
+      "type": "other"
+    },
+    {
+      "type": "custom-title"
+    },
+    {
+      "timestamp": "2026-01-01T00:00:00.346Z",
+      "type": "other"
+    },
+    {
+      "message": {
+        "content": [
+          {
+            "text": "…",
+            "type": "text"
+          },
+          {
+            "text": "…",
+            "type": "text"
+          },
+          {
+            "text": "…",
+            "type": "text"
+          }
+        ]
+      },
+      "type": "other"
+    },
+    {
+      "message": {
+        "content": [
+          {
+            "text": "…",
+            "type": "text"
+          }
+        ]
+      },
+      "type": "other"
+    },
+    {
+      "timestamp": "2026-01-01T00:00:00.346Z",
+      "type": "other"
+    },
+    {
+      "type": "last-prompt"
+    },
+    {
+      "type": "custom-title"
+    },
+    {
+      "type": "other"
+    },
+    {
+      "type": "other"
+    },
+    {
+      "type": "other"
+    },
+    {
+      "type": "other"
+    },
+    {
+      "type": "other"
+    },
+    {
+      "message": {
+        "content": [
+          {
+            "type": "thinking"
+          }
+        ],
+        "stop_reason": "tool_use"
+      },
+      "timestamp": "2026-01-01T00:00:02.548Z",
+      "type": "assistant"
+    },
+    {
+      "message": {
+        "content": [
+          {
+            "id": "t1",
+            "input": {},
+            "name": "mcp__server__tool",
+            "type": "tool_use"
+          }
+        ],
+        "stop_reason": "tool_use"
+      },
+      "timestamp": "2026-01-01T00:00:04.049Z",
+      "type": "assistant"
+    }
+  ],
+  "pending": {
+    "tool": "WebFetch"
+  },
+  "process": false
+}

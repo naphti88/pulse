@@ -1,0 +1,253 @@
+{
+  "ageMs": 0.0,
+  "expect": {
+    "rule": "result",
+    "stage": "done",
+    "state": "review"
+  },
+  "lines": [
+    {
+      "message": {
+        "content": "…"
+      },
+      "timestamp": "2026-01-01T00:00:00.000Z",
+      "type": "user"
+    },
+    {
+      "timestamp": "2026-01-01T00:00:00.000Z",
+      "type": "attachment"
+    },
+    {
+      "timestamp": "2026-01-01T00:00:00.000Z",
+      "type": "attachment"
+    },
+    {
+      "timestamp": "2026-01-01T00:00:00.000Z",
+      "type": "attachment"
+    },
+    {
+      "timestamp": "2026-01-01T00:00:00.000Z",
+      "type": "attachment"
+    },
+    {
+      "timestamp": "2026-01-01T00:00:00.000Z",
+      "type": "attachment"
+    },
+    {
+      "timestamp": "2026-01-01T00:00:00.000Z",
+      "type": "attachment"
+    },
+    {
+      "timestamp": "2026-01-01T00:00:00.000Z",
+      "type": "attachment"
+    },
+    {
+      "timestamp": "2026-01-01T00:00:00.000Z",
+      "type": "attachment"
+    },
+    {
+      "timestamp": "2026-01-01T00:00:00.000Z",
+      "type": "attachment"
+    },
+    {
+      "timestamp": "2026-01-01T00:00:00.000Z",
+      "type": "attachment"
+    },
+    {
+      "type": "last-prompt"
+    },
+    {
+      "type": "custom-title"
+    },
+    {
+      "type": "other"
+    },
+    {
+      "type": "custom-title"
+    },
+    {
+      "type": "file-history-snapshot"
+    },
+    {
+      "type": "other"
+    },
+    {
+      "timestamp": "2026-01-01T00:00:00.018Z",
+      "type": "attachment"
+    },
+    {
+      "timestamp": "2026-01-01T00:00:00.018Z",
+      "type": "attachment"
+    },
+    {
+      "timestamp": "2026-01-01T00:00:00.018Z",
+      "type": "attachment"
+    },
+    {
+      "timestamp": "2026-01-01T00:00:00.019Z",
+      "type": "attachment"
+    },
+    {
+      "timestamp": "2026-01-01T00:00:00.020Z",
+      "type": "attachment"
+    },
+    {
+      "timestamp": "2026-01-01T00:00:00.022Z",
+      "type": "attachment"
+    },
+    {
+      "type": "other"
+    },
+    {
+      "type": "custom-title"
+    },
+    {
+      "message": {
+        "content": [
+          {
+            "type": "thinking"
+          }
+        ],
+        "stop_reason": "tool_use"
+      },
+      "timestamp": "2026-01-01T00:00:11.444Z",
+      "type": "assistant"
+    },
+    {
+      "message": {
+        "content": [
+          {
+            "id": "t1",
+            "input": {},
+            "name": "ToolSearch",
+            "type": "tool_use"
+          }
+        ],
+        "stop_reason": "tool_use"
+      },
+      "timestamp": "2026-01-01T00:00:11.761Z",
+      "type": "assistant"
+    },
+    {
+      "message": {
+        "content": [
+          {
+            "content": [],
+            "tool_use_id": "t1",
+            "type": "tool_result"
+          }
+        ]
+      },
+      "timestamp": "2026-01-01T00:00:11.800Z",
+      "type": "user"
+    },
+    {
+      "timestamp": "2026-01-01T00:00:11.801Z",
+      "type": "attachment"
+    },
+    {
+      "timestamp": "2026-01-01T00:00:11.804Z",
+      "type": "attachment"
+    },
+    {
+      "timestamp": "2026-01-01T00:00:11.805Z",
+      "type": "attachment"
+    },
+    {
+      "timestamp": "2026-01-01T00:00:11.806Z",
+      "type": "attachment"
+    },
+    {
+      "type": "last-prompt"
+    },
+    {
+      "type": "custom-title"
+    },
+    {
+      "type": "other"
+    },
+    {
+      "type": "other"
+    },
+    {
+      "type": "other"
+    },
+    {
+      "timestamp": "2026-01-01T00:00:13.709Z",
+      "type": "attachment"
+    },
+    {
+      "message": {
+        "content": [
+          {
+            "id": "t2",
+            "input": {},
+            "name": "WebSearch",
+            "type": "tool_use"
+          }
+        ],
+        "stop_reason": "tool_use"
+      },
+      "timestamp": "2026-01-01T00:00:13.709Z",
+      "type": "assistant"
+    },
+    {
+      "message": {
+        "content": [
+          {
+            "id": "t3",
+            "input": {},
+            "name": "WebSearch",
+            "type": "tool_use"
+          }
+        ],
+        "stop_reason": "tool_use"
+      },
+      "timestamp": "2026-01-01T00:00:13.930Z",
+      "type": "assistant"
+    },
+    {
+      "message": {
+        "content": [
+          {
+            "content": "…",
+            "tool_use_id": "t3",
+            "type": "tool_result"
+          }
+        ]
+      },
+      "timestamp": "2026-01-01T00:00:20.958Z",
+      "type": "user"
+    },
+    {
+      "message": {
+        "content": [
+          {
+            "content": "…",
+            "tool_use_id": "t2",
+            "type": "tool_result"
+          }
+        ]
+      },
+      "timestamp": "2026-01-01T00:00:22.493Z",
+      "type": "user"
+    },
+    {
+      "timestamp": "2026-01-01T00:00:22.502Z",
+      "type": "attachment"
+    },
+    {
+      "message": {
+        "content": [
+          {
+            "type": "thinking"
+          }
+        ],
+        "stop_reason": "end_turn"
+      },
+      "timestamp": "2026-01-01T00:00:49.050Z",
+      "type": "assistant"
+    }
+  ],
+  "process": false
+}

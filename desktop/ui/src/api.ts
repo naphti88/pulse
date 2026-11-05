@@ -22,6 +22,7 @@ export function useSnapshot() {
 
 export const mark = (ids: string[], kind: 'seen' | 'done' | 'open' | 'park' | 'resume' | 'forget', shown?: number) => invoke('mark', { ids, kind, shown })
 export const openChat = (id: string) => invoke('open_chat', { id })
+export const saveCase = (id: string) => invoke<string>('save_case', { id })
 export const setPinned = (pinned: boolean) => invoke<boolean>('set_pinned', { pinned })
 export const closePanel = () => invoke('close_panel')
 export const panelSize = (height: number, width?: number) => invoke('panel_size', { width, height })

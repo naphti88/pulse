@@ -17,6 +17,9 @@ export type Subagent = {
   depth: number
 }
 
+// src-tauri/src/rules.rs: which rules made an item what it is
+export type Why = { rule: string; says: string; stageRule: string; stageSays: string; passed: string[]; facts: string[] }
+
 export type Item = {
   id: string
   title: string
@@ -30,6 +33,7 @@ export type Item = {
   parentId?: string
   live?: Live
   subagents: Subagent[]
+  why: Why
 }
 
 export type Planned = { title: string; project: string; kind: Kind; at: number; count: number; last: number }

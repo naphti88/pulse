@@ -1,0 +1,847 @@
+{
+  "ageMs": 0.0,
+  "expect": {
+    "rule": "background_work",
+    "stage": "running",
+    "state": "running"
+  },
+  "lines": [
+    {
+      "message": {
+        "content": "…"
+      },
+      "timestamp": "2026-01-01T00:00:00.000Z",
+      "type": "user"
+    },
+    {
+      "timestamp": "2026-01-01T00:00:00.000Z",
+      "type": "attachment"
+    },
+    {
+      "timestamp": "2026-01-01T00:00:00.000Z",
+      "type": "attachment"
+    },
+    {
+      "timestamp": "2026-01-01T00:00:00.000Z",
+      "type": "attachment"
+    },
+    {
+      "timestamp": "2026-01-01T00:00:00.000Z",
+      "type": "attachment"
+    },
+    {
+      "timestamp": "2026-01-01T00:00:00.000Z",
+      "type": "attachment"
+    },
+    {
+      "timestamp": "2026-01-01T00:00:00.000Z",
+      "type": "attachment"
+    },
+    {
+      "timestamp": "2026-01-01T00:00:00.000Z",
+      "type": "attachment"
+    },
+    {
+      "timestamp": "2026-01-01T00:00:00.000Z",
+      "type": "attachment"
+    },
+    {
+      "timestamp": "2026-01-01T00:00:00.000Z",
+      "type": "attachment"
+    },
+    {
+      "timestamp": "2026-01-01T00:00:00.023Z",
+      "type": "attachment"
+    },
+    {
+      "type": "last-prompt"
+    },
+    {
+      "type": "custom-title"
+    },
+    {
+      "type": "other"
+    },
+    {
+      "type": "custom-title"
+    },
+    {
+      "type": "file-history-snapshot"
+    },
+    {
+      "type": "other"
+    },
+    {
+      "timestamp": "2026-01-01T00:00:00.061Z",
+      "type": "attachment"
+    },
+    {
+      "timestamp": "2026-01-01T00:00:00.061Z",
+      "type": "attachment"
+    },
+    {
+      "timestamp": "2026-01-01T00:00:00.061Z",
+      "type": "attachment"
+    },
+    {
+      "timestamp": "2026-01-01T00:00:00.062Z",
+      "type": "attachment"
+    },
+    {
+      "timestamp": "2026-01-01T00:00:00.063Z",
+      "type": "attachment"
+    },
+    {
+      "timestamp": "2026-01-01T00:00:00.064Z",
+      "type": "attachment"
+    },
+    {
+      "type": "last-prompt"
+    },
+    {
+      "type": "custom-title"
+    },
+    {
+      "type": "other"
+    },
+    {
+      "type": "other"
+    },
+    {
+      "type": "other"
+    },
+    {
+      "timestamp": "2026-01-01T00:00:00.404Z",
+      "type": "other"
+    },
+    {
+      "message": {
+        "content": [
+          {
+            "text": "…",
+            "type": "text"
+          },
+          {
+            "text": "…",
+            "type": "text"
+          },
+          {
+            "text": "…",
+            "type": "text"
+          },
+          {
+            "text": "…",
+            "type": "text"
+          }
+        ]
+      },
+      "type": "other"
+    },
+    {
+      "message": {
+        "content": [
+          {
+            "text": "…",
+            "type": "text"
+          }
+        ]
+      },
+      "type": "other"
+    },
+    {
+      "timestamp": "2026-01-01T00:00:00.404Z",
+      "type": "other"
+    },
+    {
+      "type": "last-prompt"
+    },
+    {
+      "type": "custom-title"
+    },
+    {
+      "type": "other"
+    },
+    {
+      "type": "other"
+    },
+    {
+      "type": "other"
+    },
+    {
+      "type": "other"
+    },
+    {
+      "message": {
+        "content": [
+          {
+            "id": "t1",
+            "input": {},
+            "name": "mcp__server__tool",
+            "type": "tool_use"
+          }
+        ],
+        "stop_reason": "tool_use"
+      },
+      "timestamp": "2026-01-01T00:00:03.096Z",
+      "type": "assistant"
+    },
+    {
+      "message": {
+        "content": [
+          {
+            "content": [
+              {
+                "text": "…",
+                "type": "text"
+              }
+            ],
+            "tool_use_id": "t1",
+            "type": "tool_result"
+          }
+        ]
+      },
+      "timestamp": "2026-01-01T00:00:03.120Z",
+      "type": "user"
+    },
+    {
+      "message": {
+        "content": [
+          {
+            "id": "t2",
+            "input": {},
+            "name": "Bash",
+            "type": "tool_use"
+          }
+        ],
+        "stop_reason": "tool_use"
+      },
+      "timestamp": "2026-01-01T00:00:05.795Z",
+      "type": "assistant"
+    },
+    {
+      "message": {
+        "content": [
+          {
+            "content": "…",
+            "tool_use_id": "t2",
+            "type": "tool_result"
+          }
+        ]
+      },
+      "timestamp": "2026-01-01T00:00:08.668Z",
+      "type": "user"
+    },
+    {
+      "timestamp": "2026-01-01T00:00:08.670Z",
+      "type": "attachment"
+    },
+    {
+      "timestamp": "2026-01-01T00:00:08.673Z",
+      "type": "attachment"
+    },
+    {
+      "timestamp": "2026-01-01T00:00:08.674Z",
+      "type": "attachment"
+    },
+    {
+      "type": "last-prompt"
+    },
+    {
+      "type": "custom-title"
+    },
+    {
+      "type": "other"
+    },
+    {
+      "type": "other"
+    },
+    {
+      "type": "other"
+    },
+    {
+      "message": {
+        "content": [
+          {
+            "id": "t1",
+            "input": {},
+            "name": "mcp__server__tool",
+            "type": "tool_use"
+          },
+          {
+            "id": "t2",
+            "input": {},
+            "name": "Bash",
+            "type": "tool_use"
+          }
+        ]
+      },
+      "type": "other"
+    },
+    {
+      "message": {
+        "content": [
+          {
+            "content": [
+              {
+                "text": "…",
+                "type": "text"
+              }
+            ],
+            "tool_use_id": "t1",
+            "type": "tool_result"
+          },
+          {
+            "content": "…",
+            "tool_use_id": "t2",
+            "type": "tool_result"
+          },
+          {
+            "text": "…",
+            "type": "text"
+          }
+        ]
+      },
+      "type": "other"
+    },
+    {
+      "message": {
+        "content": [
+          {
+            "text": "…",
+            "type": "text"
+          }
+        ]
+      },
+      "type": "other"
+    },
+    {
+      "timestamp": "2026-01-01T00:00:08.930Z",
+      "type": "other"
+    },
+    {
+      "message": {
+        "content": [
+          {
+            "id": "t3",
+            "input": {},
+            "name": "Bash",
+            "type": "tool_use"
+          }
+        ],
+        "stop_reason": "tool_use"
+      },
+      "timestamp": "2026-01-01T00:00:11.883Z",
+      "type": "assistant"
+    },
+    {
+      "message": {
+        "content": [
+          {
+            "content": "…",
+            "tool_use_id": "t3",
+            "type": "tool_result"
+          }
+        ]
+      },
+      "timestamp": "2026-01-01T00:00:12.354Z",
+      "type": "user"
+    },
+    {
+      "type": "last-prompt"
+    },
+    {
+      "type": "custom-title"
+    },
+    {
+      "type": "other"
+    },
+    {
+      "type": "other"
+    },
+    {
+      "type": "other"
+    },
+    {
+      "timestamp": "2026-01-01T00:00:12.678Z",
+      "type": "other"
+    },
+    {
+      "message": {
+        "content": [
+          {
+            "type": "thinking"
+          }
+        ],
+        "stop_reason": "tool_use"
+      },
+      "timestamp": "2026-01-01T00:00:26.447Z",
+      "type": "assistant"
+    },
+    {
+      "message": {
+        "content": [
+          {
+            "id": "t4",
+            "input": {},
+            "name": "Bash",
+            "type": "tool_use"
+          }
+        ],
+        "stop_reason": "tool_use"
+      },
+      "timestamp": "2026-01-01T00:00:28.904Z",
+      "type": "assistant"
+    },
+    {
+      "message": {
+        "content": [
+          {
+            "id": "t5",
+            "input": {},
+            "name": "mcp__server__tool",
+            "type": "tool_use"
+          }
+        ],
+        "stop_reason": "tool_use"
+      },
+      "timestamp": "2026-01-01T00:00:29.264Z",
+      "type": "assistant"
+    },
+    {
+      "message": {
+        "content": [
+          {
+            "content": "…",
+            "tool_use_id": "t4",
+            "type": "tool_result"
+          }
+        ]
+      },
+      "timestamp": "2026-01-01T00:00:32.255Z",
+      "type": "user"
+    },
+    {
+      "message": {
+        "content": [
+          {
+            "content": [
+              {
+                "text": "…",
+                "type": "text"
+              }
+            ],
+            "tool_use_id": "t5",
+            "type": "tool_result"
+          }
+        ]
+      },
+      "timestamp": "2026-01-01T00:00:32.269Z",
+      "type": "user"
+    },
+    {
+      "timestamp": "2026-01-01T00:00:32.308Z",
+      "type": "other"
+    },
+    {
+      "type": "last-prompt"
+    },
+    {
+      "type": "custom-title"
+    },
+    {
+      "type": "other"
+    },
+    {
+      "type": "other"
+    },
+    {
+      "type": "other"
+    },
+    {
+      "message": {
+        "content": [
+          {
+            "type": "thinking"
+          }
+        ],
+        "stop_reason": "tool_use"
+      },
+      "timestamp": "2026-01-01T00:00:46.115Z",
+      "type": "assistant"
+    },
+    {
+      "message": {
+        "content": [
+          {
+            "id": "t6",
+            "input": {},
+            "name": "Bash",
+            "type": "tool_use"
+          }
+        ],
+        "stop_reason": "tool_use"
+      },
+      "timestamp": "2026-01-01T00:00:48.682Z",
+      "type": "assistant"
+    },
+    {
+      "message": {
+        "content": [
+          {
+            "content": "…",
+            "tool_use_id": "t6",
+            "type": "tool_result"
+          }
+        ]
+      },
+      "timestamp": "2026-01-01T00:00:49.106Z",
+      "type": "user"
+    },
+    {
+      "timestamp": "2026-01-01T00:00:49.131Z",
+      "type": "other"
+    },
+    {
+      "message": {
+        "content": [
+          {
+            "type": "thinking"
+          }
+        ],
+        "stop_reason": "tool_use"
+      },
+      "timestamp": "2026-01-01T00:00:52.075Z",
+      "type": "assistant"
+    },
+    {
+      "message": {
+        "content": [
+          {
+            "id": "t7",
+            "input": {},
+            "name": "Bash",
+            "type": "tool_use"
+          }
+        ],
+        "stop_reason": "tool_use"
+      },
+      "timestamp": "2026-01-01T00:00:53.674Z",
+      "type": "assistant"
+    },
+    {
+      "message": {
+        "content": [
+          {
+            "content": "…",
+            "tool_use_id": "t7",
+            "type": "tool_result"
+          }
+        ]
+      },
+      "timestamp": "2026-01-01T00:00:54.043Z",
+      "type": "user"
+    },
+    {
+      "timestamp": "2026-01-01T00:00:54.047Z",
+      "type": "attachment"
+    },
+    {
+      "message": {
+        "content": [
+          {
+            "text": "…",
+            "type": "text"
+          }
+        ]
+      },
+      "type": "other"
+    },
+    {
+      "timestamp": "2026-01-01T00:00:54.071Z",
+      "type": "other"
+    },
+    {
+      "message": {
+        "content": [
+          {
+            "type": "thinking"
+          }
+        ],
+        "stop_reason": "tool_use"
+      },
+      "timestamp": "2026-01-01T00:00:56.361Z",
+      "type": "assistant"
+    },
+    {
+      "message": {
+        "content": [
+          {
+            "text": "…",
+            "type": "text"
+          }
+        ],
+        "stop_reason": "tool_use"
+      },
+      "timestamp": "2026-01-01T00:00:56.367Z",
+      "type": "assistant"
+    },
+    {
+      "message": {
+        "content": [
+          {
+            "id": "t8",
+            "input": {},
+            "name": "Bash",
+            "type": "tool_use"
+          }
+        ],
+        "stop_reason": "tool_use"
+      },
+      "timestamp": "2026-01-01T00:00:57.638Z",
+      "type": "assistant"
+    },
+    {
+      "type": "last-prompt"
+    },
+    {
+      "type": "custom-title"
+    },
+    {
+      "type": "other"
+    },
+    {
+      "type": "other"
+    },
+    {
+      "type": "other"
+    },
+    {
+      "message": {
+        "content": [
+          {
+            "content": "…",
+            "tool_use_id": "t8",
+            "type": "tool_result"
+          }
+        ]
+      },
+      "timestamp": "2026-01-01T00:00:58.754Z",
+      "type": "user"
+    },
+    {
+      "timestamp": "2026-01-01T00:00:58.782Z",
+      "type": "other"
+    },
+    {
+      "message": {
+        "content": [
+          {
+            "type": "thinking"
+          }
+        ],
+        "stop_reason": "tool_use"
+      },
+      "timestamp": "2026-01-01T00:00:59.977Z",
+      "type": "assistant"
+    },
+    {
+      "message": {
+        "content": [
+          {
+            "id": "t9",
+            "input": {},
+            "name": "Bash",
+            "type": "tool_use"
+          }
+        ],
+        "stop_reason": "tool_use"
+      },
+      "timestamp": "2026-01-01T00:01:19.782Z",
+      "type": "assistant"
+    },
+    {
+      "message": {
+        "content": [
+          {
+            "content": "…",
+            "tool_use_id": "t9",
+            "type": "tool_result"
+          }
+        ]
+      },
+      "timestamp": "2026-01-01T00:01:31.893Z",
+      "type": "user"
+    },
+    {
+      "timestamp": "2026-01-01T00:01:31.937Z",
+      "type": "other"
+    },
+    {
+      "type": "last-prompt"
+    },
+    {
+      "type": "custom-title"
+    },
+    {
+      "type": "other"
+    },
+    {
+      "type": "other"
+    },
+    {
+      "type": "other"
+    },
+    {
+      "message": {
+        "content": [
+          {
+            "type": "thinking"
+          }
+        ],
+        "stop_reason": "tool_use"
+      },
+      "timestamp": "2026-01-01T00:01:33.411Z",
+      "type": "assistant"
+    },
+    {
+      "message": {
+        "content": [
+          {
+            "id": "t10",
+            "input": {},
+            "name": "Bash",
+            "type": "tool_use"
+          }
+        ],
+        "stop_reason": "tool_use"
+      },
+      "timestamp": "2026-01-01T00:01:53.344Z",
+      "type": "assistant"
+    },
+    {
+      "message": {
+        "content": [
+          {
+            "id": "t11",
+            "input": {},
+            "name": "mcp__server__tool",
+            "type": "tool_use"
+          }
+        ],
+        "stop_reason": "tool_use"
+      },
+      "timestamp": "2026-01-01T00:01:53.685Z",
+      "type": "assistant"
+    },
+    {
+      "message": {
+        "content": [
+          {
+            "content": "…",
+            "tool_use_id": "t10",
+            "type": "tool_result"
+          }
+        ]
+      },
+      "timestamp": "2026-01-01T00:02:32.344Z",
+      "type": "user"
+    },
+    {
+      "message": {
+        "content": [
+          {
+            "content": [
+              {
+                "text": "…",
+                "type": "text"
+              }
+            ],
+            "tool_use_id": "t11",
+            "type": "tool_result"
+          }
+        ]
+      },
+      "timestamp": "2026-01-01T00:02:32.365Z",
+      "type": "user"
+    },
+    {
+      "timestamp": "2026-01-01T00:02:32.403Z",
+      "type": "other"
+    },
+    {
+      "type": "last-prompt"
+    },
+    {
+      "type": "custom-title"
+    },
+    {
+      "type": "other"
+    },
+    {
+      "type": "other"
+    },
+    {
+      "type": "other"
+    },
+    {
+      "message": {
+        "content": [
+          {
+            "type": "thinking"
+          }
+        ],
+        "stop_reason": "tool_use"
+      },
+      "timestamp": "2026-01-01T00:02:35.233Z",
+      "type": "assistant"
+    },
+    {
+      "message": {
+        "content": [
+          {
+            "id": "t12",
+            "input": {
+              "run_in_background": true
+            },
+            "name": "Bash",
+            "type": "tool_use"
+          }
+        ],
+        "stop_reason": "tool_use"
+      },
+      "timestamp": "2026-01-01T00:02:38.738Z",
+      "type": "assistant"
+    },
+    {
+      "message": {
+        "content": [
+          {
+            "content": "running in background with ID: t13",
+            "tool_use_id": "t12",
+            "type": "tool_result"
+          }
+        ]
+      },
+      "timestamp": "2026-01-01T00:02:38.910Z",
+      "type": "user"
+    },
+    {
+      "timestamp": "2026-01-01T00:02:38.949Z",
+      "type": "other"
+    },
+    {
+      "message": {
+        "content": [
+          {
+            "text": "…\nSTATUS: worked | …",
+            "type": "text"
+          }
+        ],
+        "stop_reason": "end_turn"
+      },
+      "timestamp": "2026-01-01T00:02:40.702Z",
+      "type": "assistant"
+    }
+  ],
+  "process": "background"
+}

@@ -10,12 +10,12 @@ use std::sync::{LazyLock, Mutex};
 use serde_json::Value;
 
 use crate::live::is_prompt;
+use crate::rules::Word;
 use crate::util::{flag, json_lines, kind, read_tail, text_blocks};
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct Said {
-    // idle, worked, waiting, blocked or parked
-    pub state: String,
+    pub state: Word,
     pub text: String,
 }
 
@@ -31,17 +31,17 @@ fn status_line(line: &str) -> Option<Said> {
     let line = line.trim_start_matches([' ', '\t', '>', '*', '_', '`']);
     let line = reference(line).or_else(|| line.strip_prefix("<!--")).unwrap_or(line).trim_start();
     let rest = line.strip_prefix("STATUS:")?.trim_start();
-    let state = ["idle", "worked", "waiting", "blocked", "parked"].into_iter().find(|s| {
-        rest.get(..s.len()).is_some_and(|word| word.eq_ignore_ascii_case(s)) && !rest[s.len()..].starts_with(|c: char| c.is_alphanumeric())
+    let (name, state) = Word::ALL.into_iter().find(|(name, _)| {
+        rest.get(..name.len()).is_some_and(|word| word.eq_ignore_ascii_case(name)) && !rest[name.len()..].starts_with(|c: char| c.is_alphanumeric())
     })?;
-    let text = rest[state.len()..].trim_end_matches([' ', '\t', '*', '_', '`']);
+    let text = rest[name.len()..].trim_end_matches([' ', '\t', '*', '_', '`']);
     let text = text.strip_suffix("-->").unwrap_or(text);
     let text = text.trim_start().trim_start_matches(['|', ':', '–', '-']).trim();
-    Some(Said { state: state.to_string(), text: text.to_string() })
+    Some(Said { state, text: text.to_string() })
 }
 
 // the last STATUS line of an answer
-fn status_of(text: &str) -> Option<Said> {
+pub fn status_of(text: &str) -> Option<Said> {
     text.lines().filter_map(status_line).last()
 }
 

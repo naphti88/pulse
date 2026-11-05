@@ -23,7 +23,7 @@ It has two parts:
 
 | Part | What it does |
 | --- | --- |
-| [`routine-recorder`](routine-recorder) | A Claude Code plugin. It asks every session to end its answers with a `STATUS:` line (worked, waiting, blocked, idle, parked) and records each scheduled-routine run to `~/.claude/routine-recorder/runs`. |
+| [`routine-recorder`](routine-recorder) | A Claude Code plugin. It asks every session to end its answers with a `STATUS:` line (worked, waiting, blocked, idle, parked), records each scheduled-routine run to `~/.claude/routine-recorder/runs` and reports what waits for your approval. |
 | [`desktop`](desktop) | Pulse itself, a Tauri app. It reads the sessions of the Claude desktop app, their transcripts and the records of the plugin. |
 
 ## Requirements
@@ -103,7 +103,8 @@ anywhere.
   and the process table (for the commands sessions run).
 - **Writes:** its own state and settings in
   `~/Library/Application Support/local.claude-dashboard.pulse/`; the plugin
-  writes its records to `~/.claude/routine-recorder/runs`.
+  writes its records to `~/.claude/routine-recorder/runs` and what waits for
+  you, by the name of a tool only, to `~/.claude/routine-recorder/pending`.
 
 Pulse reads files of the Claude desktop app that are not a documented
 interface. An update of the app can change them and break Pulse until it is
@@ -122,6 +123,10 @@ with `~/.claude/routine-recorder` if you like.
 How Pulse works, what each state means and how to build and test it:
 [`desktop/README.md`](desktop/README.md). The plugin's tests run with
 `claude plugin test routine-recorder`; Pulse's with `npm test` in `desktop`.
+
+Nothing private may enter this public repository: run `npm run setup` in
+`desktop` once, it turns on the hooks that check every commit and push. How that
+works: [Keeping what is private out of git](desktop/README.md#keeping-what-is-private-out-of-git).
 
 ## License
 

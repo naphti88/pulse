@@ -60,6 +60,10 @@ the panel (`ui/`, React) only draws.
   and questions are told at once, everything open is reminded of. Quiet hours
   are left to macOS Focus. A click on a notification about one session opens
   its chat in Claude.
+- **Why it is here:** the question mark among a line's marks unfolds the rule
+  that made the item what it is, the rules before it that did not hold and what
+  was known. *Copy* hands that on; *Save case* keeps the shape of the turn as a
+  test case on this Mac, with nothing that was said.
 - **Appearance**, also under the gear: the panel light, dark or as the
   system is (the default); the window's material follows it. The app icon in the
   foot of the panel follows it too: `assets/app-icon.svg` dark,
@@ -86,10 +90,13 @@ do); the chat shows it, as it shows HTML comments and markdown references. Pulse
 a routine run or from the end of a chat's transcript; a chat from before that
 is filed by the app's own summary. A session that puts a choice or a plan to you in the middle of its turn asks
 you something, not runs. A session that waits for your approval of a call is
-blocked, not running:
-a shell command open for 30 s without its process, or an edit open as long
-(in auto mode a classifier looks at a command for 10 to 15 s before it runs,
-and the session goes on by itself whether it allows it or not).
+blocked, not running. The plugin tells Pulse when a permission dialog or a
+question of an MCP server stands before you, for any tool, and the call being
+over ends it, whatever the plugin's file says. Without that report (an older
+plugin) it is a guess from the transcript: a shell command open for 30 s
+without its process, or an edit open as long (in auto mode a classifier looks
+at a command for 10 to 15 s before it runs, and the session goes on by itself
+whether it allows it or not).
 A session whose turn ended but that still
 has a command, workflow or monitor running in the background (or a background
 subagent) is running: it waits for that work and goes on when it is done;
@@ -97,6 +104,53 @@ unless its last answer said it waits for you, is blocked or parked, which
 comes first (the command shows under *Commands to check*). An
 item that changes after a mark is open again. Items without activity for 14
 days drop out.
+
+## How an item gets its state
+
+Everything that decides is in `src-tauri/src/rules.rs`. The readers only gather
+facts (`Evidence`); there, two lists, one for the state and one for the stage,
+are read from the top and the first rule that holds wins. To know what wins
+over what, read the lists. Every number the decisions lean on is in `limits` at
+the top of that file. Chats and routine runs go through the same lists.
+
+A new rule comes with a case: what really happened, in `src-tauri/testdata/`,
+played through the same readers and rules as a real session by `npm test`. A
+case is made from a real turn by *Save case* (or from a transcript, by the
+ignored test `make_cases`), which keeps its shape and nothing that was said
+(`scrub.rs`). A saved case stays in `~/Library/Application
+Support/local.claude-dashboard.pulse/captures`; to become a test it is moved to
+`testdata/` by hand.
+
+## Keeping what is private out of git
+
+The repository is public and what was pushed once cannot be called back. Chats
+stay on the Mac, so tests never need them. `tools/check_private.py` stops what
+is private, and names only the file, the line and the rule, never what it found:
+
+- **Before a commit and a push:** the hooks in `.githooks`, set up by
+  `npm run setup` (`git config core.hooksPath .githooks`). A clone that did not
+  run it has no hooks.
+- **After a push:** `.github/workflows/private-check.yml`, for what got around
+  them. It can only raise the alarm.
+- **In `testdata/`:** only known keys and known values
+  (`testdata/allowed.json`): what is not listed is refused, here and by the
+  scrubbing itself. That list is the only one that lets a word in, so it holds
+  no names.
+
+It stops transcripts and capture folders by their name, and keys, tokens, mail
+addresses, home folders, session ids and lines of a transcript by what they are.
+What only you know (a customer, a project) goes in
+`~/.config/pulse/private-words.txt`, one per line. That file stays on the Mac: a
+list of what is private must not be public itself.
+
+## When the app changes
+
+Pulse reads files of the Claude app that are not a documented interface. An
+update would rarely fail outright: a field would stay empty and items go a
+little wrong. `src-tauri/src/drift.rs` looks at what comes in and says so in the
+panel's foot: a field gone from most sessions, transcripts no longer found, the
+shape of their entries changed, no STATUS line in any recent session. It only
+speaks with enough to go on, and never sends anything anywhere.
 
 ## Parking a topic
 
@@ -118,13 +172,14 @@ goes on or with *Unpark*, which puts it back in *Open*.
 - the transcripts and subagents in `~/.claude/projects` (only what was added
   since the last look, for a running session),
 - the runs the `routine-recorder` plugin writes to
-  `~/.claude/routine-recorder/runs` and the STATUS comments it asks for (the
-  plugin must stay installed).
+  `~/.claude/routine-recorder/runs`, what it reports as waiting for you in
+  `~/.claude/routine-recorder/pending` (the name of a tool, nothing of its
+  input) and the STATUS comments it asks for (the plugin must stay installed).
 
 It writes only its own state (marks, parked topics, what was notified, the
 last summary) to
-`~/Library/Application Support/local.claude-dashboard.pulse/state.json` and
-the settings to `settings.json` beside it, and
+`~/Library/Application Support/local.claude-dashboard.pulse/state.json`, the
+settings to `settings.json` beside it and cases you save to `captures/` there, and
 opens chats through `claude://` links. A file watcher (FSEvents) triggers a
 refresh, changes are gathered for 3 s; a 30 s tick catches what time alone
 changes.
@@ -137,7 +192,7 @@ Rust is pinned in `src-tauri/rust-toolchain.toml` (Tauri needs ≥ 1.90).
 npm run setup        # the Tauri CLI and the panel's packages
 npm run build        # → src-tauri/target/release/bundle/macos/Pulse.app
 npm run dev          # the panel with hot reload (vite on 5199)
-npm test             # the Rust tests
+npm test             # the Rust tests and the check of tools/check_private.py
 npm run icons        # app icon (assets/app-icon.svg) and menu bar masks, then the icon set
 ```
 

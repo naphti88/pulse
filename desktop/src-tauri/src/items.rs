@@ -9,10 +9,12 @@ use serde::Serialize;
 
 use crate::checks::Check;
 use crate::cron::{self, DAY, HOUR, MINUTE};
-use crate::inputs::{Inputs, Session, TaskDef, WINDOW_MS};
+use crate::inputs::{Inputs, Session, TaskDef};
 use crate::live::Live;
-use crate::runs::{run_state, RunRecord, RunState};
-use crate::store::{MarkKind, Parked, Store};
+use crate::rules::limits::{MARK_GRACE_MS, PARK_GRACE_MS, WINDOW_MS};
+use crate::rules::{decide_stage, decide_state, Evidence, StageEvidence, Why, Word};
+use crate::runs::{run_facts, RunRecord};
+use crate::store::{Parked, Store};
 use crate::subagents::SubagentView;
 
 #[derive(Serialize, Clone, Copy, PartialEq, Eq, Debug, Hash)]
@@ -64,6 +66,8 @@ pub struct Item {
     // when the app last brought it on show
     #[serde(skip)]
     pub focused: f64,
+    // which rules made it what it is
+    pub why: Why,
 }
 
 #[derive(Serialize, Clone)]
@@ -127,11 +131,6 @@ pub struct ParkedView {
     pub gone: bool,
 }
 
-// activity this soon after parking still belongs to it (the app writes a title, a summary)
-const PARK_GRACE_MS: f64 = 60_000.0;
-// activity this soon after what was on screen when it was marked still belongs to it
-const MARK_GRACE_MS: f64 = 15_000.0;
-
 // the project a folder belongs to: a worktree counts to its repository
 pub fn project_of(path: &str) -> String {
     let root = path.split("/.claude/worktrees/").next().unwrap_or(path).trim_end_matches('/');
@@ -163,84 +162,57 @@ pub fn kind_of(task: Option<&TaskDef>) -> Kind {
 fn item_of(s: &Session, input: &Inputs, records: &HashMap<&str, &RunRecord>, tasks: &HashMap<&str, &TaskDef>, store: &Store) -> Item {
     let now = input.now;
     let rec = s.cli_id.as_deref().and_then(|id| records.get(id).copied());
+    let said = input.said.get(&s.id);
+    let recorded = rec.and_then(|r| r.turns.last()).and_then(|t| t.status.as_deref()).and_then(Word::parse);
     // what its last answer said: of a chat from its transcript, of a run from its record
-    let last_said = match input.said.get(&s.id) {
-        Some(said) => Some(said.state.as_str()),
-        None => rec.and_then(|r| r.turns.last()).and_then(|t| t.status.as_deref()),
-    };
-    // a session whose turn ended and that waits only for work in the background
-    // runs, unless its answer said it needs the person or is set aside: that comes first
-    let needs_person = matches!(last_said, Some("waiting" | "blocked" | "parked"));
-    let is_running = input.running.contains(&s.id) && (input.in_turn.contains(&s.id) || !needs_person);
+    let last_said = said.map(|said| said.state).or(recorded);
     let task_id = s.task_id.as_deref().or(rec.map(|r| r.task_id.as_str()));
     let task = task_id.and_then(|id| tasks.get(id).copied());
     let kind = if task_id.is_some() { kind_of(task) } else { Kind::Chat };
+    let run = (kind != Kind::Chat).then(|| run_facts(rec, &s.summary, s.created_at, s.last_activity, now));
 
-    let (state, reason, started_at, since) = if kind == Kind::Chat {
-        let summary = &s.summary;
-        let said = input.said.get(&s.id);
-        let state = match said.map(|said| said.state.as_str()) {
-            _ if is_running => State::Running,
-            // what the chat said of its last answer
-            Some("waiting") => State::Waiting,
-            Some("blocked") => State::Blocked,
-            Some("idle") => State::Quiet,
-            Some(_) => State::Review,
-            // a chat from before the STATUS line: the app files one that asks
-            // the person something as blocked
-            None if !summary.needs_action.is_empty() || summary.category.as_deref() == Some("blocked") => State::Waiting,
-            None => State::Review,
-        };
-        let reason = match said {
-            Some(said) if !said.text.is_empty() => said.text.clone(),
-            _ if !summary.needs_action.is_empty() => summary.needs_action.clone(),
-            _ => summary.detail.clone(),
-        };
-        let activity = s.last_activity.unwrap_or(0.0);
-        (state, reason, s.created_at.unwrap_or(activity), activity)
-    } else {
-        let run = run_state(rec, &s.summary, s.created_at, s.last_activity, is_running, now);
-        let state = match run.state {
-            RunState::Running => State::Running,
-            RunState::Waiting => State::Waiting,
-            RunState::Blocked => State::Blocked,
-            RunState::Idle => State::Quiet,
-            RunState::Worked | RunState::Parked | RunState::Unknown => State::Review,
-        };
-        (state, run.summary, run.started_at, run.last_activity)
+    let evidence = Evidence {
+        running: input.running.contains(&s.id),
+        in_turn: input.in_turn.contains(&s.id),
+        record_open: run.as_ref().is_some_and(|r| r.record_open),
+        word: if kind == Kind::Chat { said.map(|said| said.state) } else { run.as_ref().and_then(|r| r.word) },
+        needs_person: matches!(last_said, Some(Word::Waiting | Word::Blocked | Word::Parked)),
+        has_record: rec.is_some(),
+        refused: run.as_ref().is_some_and(|r| r.refused),
+        quiet_shape: run.as_ref().is_some_and(|r| r.quiet_shape),
+        asking: input.asking.get(&s.id).cloned(),
+        pending: input.pending.get(&s.id).cloned(),
+        awaiting: input.awaiting.get(&s.id).cloned(),
+        ..Evidence::of(kind, s.summary.clone())
     };
+    let (rule, passed) = decide_state(&evidence);
+    let state = rule.gives;
 
-    // a call that waits for the person's approval holds the session up
-    // and a question it puts to them, a choice or a plan, is one for them
-    let (state, reason, since) = match (input.awaiting.get(&s.id), input.asking.get(&s.id)) {
-        (_, Some((question, at))) => (State::Waiting, question.clone(), *at),
-        (Some((what, at)), None) => (State::Blocked, format!("Waiting for approval: {what}"), *at),
-        (None, None) => (state, reason, since),
+    let activity = s.last_activity.unwrap_or(0.0);
+    let (started_at, last_activity, words) = match &run {
+        Some(run) => (run.started_at, run.last_activity, run.reason(state, &s.summary)),
+        None => (s.created_at.unwrap_or(activity), activity, s.summary.words(said.map(|said| said.text.clone()))),
+    };
+    let (reason, since) = match (&evidence.asking, &evidence.pending, &evidence.awaiting) {
+        (Some((question, at)), _, _) => (question.clone(), *at),
+        (None, Some((what, at)), _) | (None, None, Some((what, at))) => (format!("Waiting for approval: {what}"), *at),
+        (None, None, None) => (words, last_activity),
     };
 
     // parked by its last answer, unless taken up again in the panel since; or
     // parked in the panel, until the session goes on
-    let said_parked = input.said.get(&s.id).is_some_and(|said| said.state == "parked")
-        || (kind != Kind::Chat && rec.and_then(|r| r.turns.last()).and_then(|t| t.status.as_deref()) == Some("parked"));
+    let said_parked = said.is_some_and(|said| said.state == Word::Parked) || (kind != Kind::Chat && recorded == Some(Word::Parked));
     let resumed = store.resumed.get(&s.id).is_some_and(|&at| at >= since);
-    let is_parked = state != State::Running
-        && ((said_parked && !resumed) || store.parked.get(&s.id).is_some_and(|p| since <= p.at + PARK_GRACE_MS));
-
-    let mark = store.marks.get(&s.id).filter(|m| m.at >= since && m.shown.is_none_or(|shown| since <= shown + MARK_GRACE_MS));
-    let stage = match (state, mark.map(|m| m.kind)) {
-        _ if is_parked => Stage::Parked,
-        (State::Running, _) => Stage::Running,
-        (State::Quiet, _) | (_, Some(MarkKind::Done)) => Stage::Done,
-        // a result is only to be read: once opened in Claude it is done
-        (State::Review, Some(MarkKind::Seen)) => Stage::Done,
-        // (unparked it is back on the table, read long ago or not, and an
-        // answer nobody was there for has no reader yet: sync_unseen)
-        (State::Review, None) if !input.unread.contains(&s.id) && !resumed && !store.unseen.contains_key(&s.id) => Stage::Done,
-        // a question, open points or a block stay open, read or not, until
-        // they are marked done or the session goes on; "later" sets them aside
-        (_, Some(MarkKind::Seen)) => Stage::Follow,
-        _ => Stage::Open,
+    let stage_evidence = StageEvidence {
+        state,
+        is_parked: state != State::Running
+            && ((said_parked && !resumed) || store.parked.get(&s.id).is_some_and(|p| since <= p.at + PARK_GRACE_MS)),
+        mark: store.marks.get(&s.id).filter(|m| m.at >= since && m.shown.is_none_or(|shown| since <= shown + MARK_GRACE_MS)).map(|m| m.kind),
+        unread: input.unread.contains(&s.id),
+        resumed,
+        unseen: store.unseen.contains_key(&s.id),
     };
+    let (stage_rule, _) = decide_stage(&stage_evidence);
 
     let title = match (task, &s.title) {
         (Some(t), _) => clean_name(&t.name),
@@ -248,13 +220,15 @@ fn item_of(s: &Session, input: &Inputs, records: &HashMap<&str, &RunRecord>, tas
         (None, None) => task_id.map(clean_name).unwrap_or_else(|| s.id.clone()),
     };
     let folder = s.origin_cwd.as_deref().or(s.cwd.as_deref()).or(task.and_then(|t| t.cwd.as_deref())).unwrap_or("");
+    let mut facts = evidence.facts(now);
+    facts.extend(stage_evidence.facts());
     Item {
         id: s.id.clone(),
         title,
         project: project_of(folder),
         kind,
         state,
-        stage,
+        stage: stage_rule.gives,
         since,
         started_at,
         reason,
@@ -262,6 +236,14 @@ fn item_of(s: &Session, input: &Inputs, records: &HashMap<&str, &RunRecord>, tas
         live: input.live.get(&s.id).cloned(),
         subagents: input.subagents.get(&s.id).cloned().unwrap_or_default(),
         focused: s.last_focused.unwrap_or(0.0),
+        why: Why {
+            rule: rule.id.to_string(),
+            says: rule.says.to_string(),
+            stage_rule: stage_rule.id.to_string(),
+            stage_says: stage_rule.says.to_string(),
+            passed: passed.iter().map(ToString::to_string).collect(),
+            facts,
+        },
     }
 }
 
@@ -408,7 +390,7 @@ mod tests {
     use super::*;
     use crate::runs::{Summary, Turn};
     use crate::said::Said;
-    use crate::store::Mark;
+    use crate::store::{Mark, MarkKind};
     use std::collections::HashSet;
     use std::sync::Arc;
 

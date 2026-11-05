@@ -1,0 +1,512 @@
+{
+  "ageMs": 0.0,
+  "expect": {
+    "rule": "said_result",
+    "stage": "parked",
+    "state": "review"
+  },
+  "lines": [
+    {
+      "message": {
+        "content": "…"
+      },
+      "timestamp": "2026-01-01T00:00:00.000Z",
+      "type": "user"
+    },
+    {
+      "timestamp": "2026-01-01T01:02:34.388Z",
+      "type": "attachment"
+    },
+    {
+      "timestamp": "2026-01-01T01:02:34.389Z",
+      "type": "attachment"
+    },
+    {
+      "timestamp": "2026-01-01T01:02:34.389Z",
+      "type": "attachment"
+    },
+    {
+      "timestamp": "2026-01-01T01:02:34.391Z",
+      "type": "attachment"
+    },
+    {
+      "timestamp": "2026-01-01T01:02:34.401Z",
+      "type": "attachment"
+    },
+    {
+      "timestamp": "2026-01-01T01:02:34.401Z",
+      "type": "attachment"
+    },
+    {
+      "timestamp": "2026-01-01T01:02:34.401Z",
+      "type": "attachment"
+    },
+    {
+      "timestamp": "2026-01-01T01:02:34.401Z",
+      "type": "attachment"
+    },
+    {
+      "timestamp": "2026-01-01T01:02:34.401Z",
+      "type": "attachment"
+    },
+    {
+      "timestamp": "2026-01-01T01:02:34.401Z",
+      "type": "attachment"
+    },
+    {
+      "timestamp": "2026-01-01T01:02:34.401Z",
+      "type": "attachment"
+    },
+    {
+      "timestamp": "2026-01-01T01:02:34.401Z",
+      "type": "attachment"
+    },
+    {
+      "subtype": "informational",
+      "timestamp": "2026-01-01T01:02:34.546Z",
+      "type": "system"
+    },
+    {
+      "timestamp": "2026-01-01T01:02:34.547Z",
+      "type": "attachment"
+    },
+    {
+      "timestamp": "2026-01-01T01:02:34.548Z",
+      "type": "attachment"
+    },
+    {
+      "timestamp": "2026-01-01T01:02:34.549Z",
+      "type": "attachment"
+    },
+    {
+      "timestamp": "2026-01-01T01:02:34.593Z",
+      "type": "other"
+    },
+    {
+      "message": {
+        "content": [
+          {
+            "text": "…",
+            "type": "text"
+          },
+          {
+            "text": "…",
+            "type": "text"
+          },
+          {
+            "text": "…",
+            "type": "text"
+          }
+        ]
+      },
+      "type": "other"
+    },
+    {
+      "message": {
+        "content": "…"
+      },
+      "type": "other"
+    },
+    {
+      "message": {
+        "content": [
+          {
+            "text": "…\nSTATUS: waiting | …",
+            "type": "text"
+          }
+        ]
+      },
+      "type": "other"
+    },
+    {
+      "message": {
+        "content": [
+          {
+            "text": "…",
+            "type": "text"
+          },
+          {
+            "text": "…",
+            "type": "text"
+          }
+        ]
+      },
+      "type": "other"
+    },
+    {
+      "message": {
+        "content": [
+          {
+            "text": "…",
+            "type": "text"
+          }
+        ]
+      },
+      "type": "other"
+    },
+    {
+      "timestamp": "2026-01-01T01:02:34.593Z",
+      "type": "other"
+    },
+    {
+      "type": "last-prompt"
+    },
+    {
+      "type": "custom-title"
+    },
+    {
+      "type": "other"
+    },
+    {
+      "type": "mode"
+    },
+    {
+      "type": "other"
+    },
+    {
+      "timestamp": "2026-01-01T01:02:34.636Z",
+      "type": "pr-link"
+    },
+    {
+      "type": "other"
+    },
+    {
+      "timestamp": "2026-01-01T01:02:50.580Z",
+      "type": "attachment"
+    },
+    {
+      "message": {
+        "content": [
+          {
+            "type": "thinking"
+          }
+        ],
+        "stop_reason": "tool_use"
+      },
+      "timestamp": "2026-01-01T01:02:50.580Z",
+      "type": "assistant"
+    },
+    {
+      "message": {
+        "content": [
+          {
+            "id": "t1",
+            "input": {},
+            "name": "mcp__server__tool",
+            "type": "tool_use"
+          }
+        ],
+        "stop_reason": "tool_use"
+      },
+      "timestamp": "2026-01-01T01:02:50.782Z",
+      "type": "assistant"
+    },
+    {
+      "message": {
+        "content": [
+          {
+            "content": [
+              {
+                "text": "…",
+                "type": "text"
+              }
+            ],
+            "tool_use_id": "t1",
+            "type": "tool_result"
+          }
+        ]
+      },
+      "timestamp": "2026-01-01T01:02:50.825Z",
+      "type": "user"
+    },
+    {
+      "message": {
+        "content": [
+          {
+            "id": "t2",
+            "input": {},
+            "name": "Edit",
+            "type": "tool_use"
+          }
+        ],
+        "stop_reason": "tool_use"
+      },
+      "timestamp": "2026-01-01T01:02:53.234Z",
+      "type": "assistant"
+    },
+    {
+      "message": {
+        "content": [
+          {
+            "content": "…",
+            "tool_use_id": "t2",
+            "type": "tool_result"
+          }
+        ]
+      },
+      "timestamp": "2026-01-01T01:02:53.264Z",
+      "type": "user"
+    },
+    {
+      "message": {
+        "content": [
+          {
+            "id": "t3",
+            "input": {},
+            "name": "Read",
+            "type": "tool_use"
+          }
+        ],
+        "stop_reason": "tool_use"
+      },
+      "timestamp": "2026-01-01T01:02:54.032Z",
+      "type": "assistant"
+    },
+    {
+      "message": {
+        "content": [
+          {
+            "content": "…",
+            "tool_use_id": "t3",
+            "type": "tool_result"
+          }
+        ]
+      },
+      "timestamp": "2026-01-01T01:02:54.071Z",
+      "type": "user"
+    },
+    {
+      "timestamp": "2026-01-01T01:02:54.075Z",
+      "type": "attachment"
+    },
+    {
+      "timestamp": "2026-01-01T01:02:54.081Z",
+      "type": "attachment"
+    },
+    {
+      "message": {
+        "content": [
+          {
+            "type": "thinking"
+          },
+          {
+            "id": "t1",
+            "input": {},
+            "name": "mcp__server__tool",
+            "type": "tool_use"
+          },
+          {
+            "id": "t2",
+            "input": {},
+            "name": "Edit",
+            "type": "tool_use"
+          },
+          {
+            "id": "t3",
+            "input": {},
+            "name": "Read",
+            "type": "tool_use"
+          }
+        ]
+      },
+      "type": "other"
+    },
+    {
+      "message": {
+        "content": [
+          {
+            "content": [
+              {
+                "text": "…",
+                "type": "text"
+              }
+            ],
+            "tool_use_id": "t1",
+            "type": "tool_result"
+          },
+          {
+            "content": "…",
+            "tool_use_id": "t2",
+            "type": "tool_result"
+          },
+          {
+            "content": "…",
+            "tool_use_id": "t3",
+            "type": "tool_result"
+          }
+        ]
+      },
+      "type": "other"
+    },
+    {
+      "message": {
+        "content": [
+          {
+            "text": "…",
+            "type": "text"
+          }
+        ]
+      },
+      "type": "other"
+    },
+    {
+      "timestamp": "2026-01-01T01:02:54.138Z",
+      "type": "other"
+    },
+    {
+      "type": "last-prompt"
+    },
+    {
+      "type": "custom-title"
+    },
+    {
+      "type": "other"
+    },
+    {
+      "type": "mode"
+    },
+    {
+      "type": "other"
+    },
+    {
+      "timestamp": "2026-01-01T01:02:54.160Z",
+      "type": "pr-link"
+    },
+    {
+      "type": "other"
+    },
+    {
+      "timestamp": "2026-01-01T01:02:57.457Z",
+      "type": "attachment"
+    },
+    {
+      "message": {
+        "content": [
+          {
+            "id": "t4",
+            "input": {},
+            "name": "Edit",
+            "type": "tool_use"
+          }
+        ],
+        "stop_reason": "tool_use"
+      },
+      "timestamp": "2026-01-01T01:02:57.456Z",
+      "type": "assistant"
+    },
+    {
+      "message": {
+        "content": [
+          {
+            "content": "…",
+            "tool_use_id": "t4",
+            "type": "tool_result"
+          }
+        ]
+      },
+      "timestamp": "2026-01-01T01:02:57.484Z",
+      "type": "user"
+    },
+    {
+      "message": {
+        "content": [
+          {
+            "id": "t5",
+            "input": {},
+            "name": "mcp__server__tool",
+            "type": "tool_use"
+          }
+        ],
+        "stop_reason": "tool_use"
+      },
+      "timestamp": "2026-01-01T01:02:58.446Z",
+      "type": "assistant"
+    },
+    {
+      "message": {
+        "content": [
+          {
+            "content": [
+              {
+                "text": "…",
+                "type": "text"
+              }
+            ],
+            "tool_use_id": "t5",
+            "type": "tool_result"
+          }
+        ]
+      },
+      "timestamp": "2026-01-01T01:02:58.469Z",
+      "type": "user"
+    },
+    {
+      "message": {
+        "content": [
+          {
+            "id": "t4",
+            "input": {},
+            "name": "Edit",
+            "type": "tool_use"
+          },
+          {
+            "id": "t5",
+            "input": {},
+            "name": "mcp__server__tool",
+            "type": "tool_use"
+          }
+        ]
+      },
+      "type": "other"
+    },
+    {
+      "message": {
+        "content": [
+          {
+            "content": "…",
+            "tool_use_id": "t4",
+            "type": "tool_result"
+          },
+          {
+            "content": [
+              {
+                "text": "…",
+                "type": "text"
+              }
+            ],
+            "tool_use_id": "t5",
+            "type": "tool_result"
+          }
+        ]
+      },
+      "type": "other"
+    },
+    {
+      "timestamp": "2026-01-01T01:02:59.190Z",
+      "type": "other"
+    },
+    {
+      "timestamp": "2026-01-01T01:03:04.183Z",
+      "type": "attachment"
+    },
+    {
+      "message": {
+        "content": [
+          {
+            "text": "…\nSTATUS: parked | …",
+            "type": "text"
+          }
+        ],
+        "stop_reason": "end_turn"
+      },
+      "timestamp": "2026-01-01T01:03:04.182Z",
+      "type": "assistant"
+    },
+    {
+      "subtype": "stop_hook_summary",
+      "timestamp": "2026-01-01T01:03:09.758Z",
+      "type": "system"
+    }
+  ],
+  "process": false
+}

@@ -1,0 +1,23 @@
+{
+  "ageMs": 0.0,
+  "expect": {
+    "rule": "result",
+    "stage": "done",
+    "state": "review"
+  },
+  "lines": [
+    {
+      "message": {
+        "content": [
+          {
+            "text": "[Request interrupted by user]",
+            "type": "text"
+          }
+        ]
+      },
+      "timestamp": "2026-01-01T00:00:00.000Z",
+      "type": "user"
+    }
+  ],
+  "process": false
+}

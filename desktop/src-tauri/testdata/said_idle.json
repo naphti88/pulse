@@ -1,0 +1,47 @@
+{
+  "ageMs": 0.0,
+  "expect": {
+    "rule": "said_idle",
+    "stage": "done",
+    "state": "quiet"
+  },
+  "lines": [
+    {
+      "message": {
+        "content": "…"
+      },
+      "timestamp": "2026-01-01T00:00:00.000Z",
+      "type": "user"
+    },
+    {
+      "timestamp": "2026-01-01T00:00:00.007Z",
+      "type": "attachment"
+    },
+    {
+      "type": "file-history-snapshot"
+    },
+    {
+      "timestamp": "2026-01-01T00:00:00.078Z",
+      "type": "other"
+    },
+    {
+      "message": {
+        "content": [
+          {
+            "text": "…\nSTATUS: idle | …",
+            "type": "text"
+          }
+        ],
+        "stop_reason": "end_turn"
+      },
+      "timestamp": "2026-01-01T00:00:02.369Z",
+      "type": "assistant"
+    },
+    {
+      "subtype": "stop_hook_summary",
+      "timestamp": "2026-01-01T00:00:05.612Z",
+      "type": "system"
+    }
+  ],
+  "process": false
+}

@@ -490,7 +490,7 @@ button {
 .row:hover .acts {
   display: flex;
 }
-.row:hover .right:has(.acts:not(:empty)) :is(.age, .flag) {
+.row:hover .right:has(.acts:not(:empty)) :is(.age, .flag, .tm) {
   display: none;
 }
 .act {
@@ -926,3 +926,22 @@ button {
   background: var(--seg-on);
   box-shadow: 0 1px 2px rgba(0, 0, 0, 0.12);
 }
+
+/* why an item is what it is */
+.why {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  margin: 0 10px 8px 46px;
+  padding: 8px 10px;
+  border-radius: 8px;
+  background: var(--fill);
+  font-size: 11.5px;
+  color: var(--ink2);
+}
+.why p { margin: 0; }
+.why b { font-family: var(--mono); font-weight: 600; font-size: 11px; color: var(--ink); }
+.why .fact { color: var(--mute); }
+.why .passed { font-family: var(--mono); font-size: 10.5px; color: var(--faint); }
+.why-acts { display: flex; align-items: center; gap: 12px; margin-top: 4px; }
+.why-acts .note { color: var(--faint); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }

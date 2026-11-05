@@ -13,10 +13,8 @@ use std::sync::{LazyLock, Mutex};
 
 use serde_json::Value;
 
+use crate::rules::limits::WORKFLOW_MAX_AGE_MS;
 use crate::util::{parse_time, read_tail};
-
-// a workflow started longer ago is taken as gone (the app was closed, the Mac slept)
-const MAX_AGE_MS: f64 = 12.0 * 3_600_000.0;
 
 #[derive(Clone)]
 pub struct Task {
@@ -148,7 +146,7 @@ pub fn background_of(transcript: &Path, now: f64, alive: &HashSet<&str>) -> Back
     let mut open: Vec<Task> = scan
         .open
         .into_iter()
-        .filter(|(id, t)| if is_workflow(id) { now - t.started < MAX_AGE_MS && t.expires.is_none_or(|e| e > now) } else { alive.contains(id.as_str()) })
+        .filter(|(id, t)| if is_workflow(id) { now - t.started < WORKFLOW_MAX_AGE_MS && t.expires.is_none_or(|e| e > now) } else { alive.contains(id.as_str()) })
         .map(|(_, t)| t)
         .collect();
     open.sort_by(|a, b| a.started.total_cmp(&b.started));

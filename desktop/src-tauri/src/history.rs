@@ -56,10 +56,7 @@ pub fn history(input: &Inputs, items: &[Item]) -> Vec<Entry> {
                 let path = transcript_of(projects.as_deref()?, cli, s.cwd.as_deref())?;
                 said_of(&path).map(|said| said.text).filter(|t| !t.is_empty())
             };
-            let said = status
-                .or_else(|| if kind == Kind::Chat { said() } else { None })
-                .or_else(|| Some(s.summary.needs_action.clone()).filter(|t| !t.is_empty()))
-                .unwrap_or_else(|| s.summary.detail.clone());
+            let said = s.summary.words(status.or_else(|| if kind == Kind::Chat { said() } else { None }));
             Entry {
                 id: s.id.clone(),
                 title,

@@ -9,6 +9,9 @@ use std::sync::{LazyLock, Mutex};
 use serde::Serialize;
 use serde_json::Value;
 
+use crate::pending::Pending;
+use crate::rules::limits::PATIENCE_MS;
+use crate::rules::{INSTANT, QUESTIONS, SHELL};
 use crate::util::{content, flag, json_lines, kind, parse_time, read_tail, text_blocks};
 
 #[derive(Serialize, Clone, Default)]
@@ -31,17 +34,6 @@ struct OpenCall {
     at: Option<f64>,
 }
 
-// calls that put a question to the person: a choice to make, a plan to approve
-const QUESTIONS: [&str; 2] = ["AskUserQuestion", "ExitPlanMode"];
-// a shell command starts its process as soon as it may run; these tools are
-// done in a moment
-const INSTANT: [&str; 5] = ["Read", "Edit", "Write", "MultiEdit", "NotebookEdit"];
-const SHELL: [&str; 2] = ["Bash", "PowerShell"];
-// how long a call may be open before it counts as waiting for approval; in
-// auto mode a classifier looks at a command before it runs, often 10 to 15
-// seconds, and the session goes on by itself whether it allows the command or not
-const PATIENCE_MS: f64 = 30_000.0;
-
 impl Live {
     // the call that waits for the person's approval: a shell command open
     // for a few seconds without a process of the session running (has_process
@@ -50,6 +42,24 @@ impl Live {
     pub fn asks(&self) -> Option<(String, f64)> {
         let call = self.open.last().filter(|c| QUESTIONS.contains(&c.name.as_str()))?;
         Some((call.what.clone(), call.at?))
+    }
+
+    // a request the plugin saw, while the call it is about is still open; one
+    // from before this turn, or for a call that is over, waits for nobody
+    pub fn pending(&self, pending: &Pending) -> Option<(String, f64)> {
+        if self.turn_started.is_some_and(|started| pending.at < started) {
+            return None;
+        }
+        if pending.agent.is_some() {
+            return Some((format!("{} · in a subagent", pending.tool), pending.at));
+        }
+        let call = if pending.asks {
+            self.open.iter().rev().find(|c| c.name.starts_with(&pending.tool))
+        } else {
+            self.open.iter().rev().find(|c| c.name == pending.tool)
+        }?;
+        let what = if pending.asks { format!("a question of {}", call.what) } else { call.what.clone() };
+        Some((what, pending.at))
     }
 
     // (what it is, since when)
@@ -225,6 +235,27 @@ mod tests {
         // an edit open for seconds waits too; an MCP call is not judged
         apply(&mut live, &line(r#"{"type":"assistant","timestamp":"2026-10-30T10:00:01.000Z","message":{"content":[{"type":"tool_use","id":"t2","name":"mcp__x__fetch","input":{"url":"https://example.com"}}]}}"#));
         assert_eq!(live.awaiting(at + 60_000.0, false), None);
+    }
+
+    #[test]
+    fn a_request_the_plugin_saw_counts_while_its_call_is_open() {
+        let mut live = Live::default();
+        apply(&mut live, &line(PROMPT));
+        apply(&mut live, &line(r#"{"type":"assistant","timestamp":"2026-10-30T10:00:01.000Z","message":{"content":[{"type":"tool_use","id":"m1","name":"mcp__mail__send","input":{}}]}}"#));
+        let at = parse_time("2026-10-30T10:00:02.000Z").expect("time");
+        let request = |tool: &str| Pending { tool: tool.into(), at, agent: None, asks: false };
+        assert_eq!(live.pending(&request("mcp__mail__send")), Some(("mcp__mail__send".to_string(), at)));
+        // another tool, or one from before this turn: no
+        assert_eq!(live.pending(&request("Bash")), None);
+        assert_eq!(live.pending(&Pending { at: 5.0, ..request("mcp__mail__send") }), None);
+        // a question of the server comes in the call it belongs to
+        let question = Pending { asks: true, ..request("mcp__") };
+        assert_eq!(live.pending(&question), Some(("a question of mcp__mail__send".to_string(), at)));
+        // a subagent's call is not in this transcript
+        assert!(live.pending(&Pending { agent: Some("a1".into()), ..request("Bash") }).is_some());
+        // the call is over: whatever the file says
+        apply(&mut live, &line(r#"{"type":"user","message":{"content":[{"type":"tool_result","tool_use_id":"m1","content":"ok"}]}}"#));
+        assert_eq!(live.pending(&request("mcp__mail__send")), None);
     }
 
     #[test]

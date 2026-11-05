@@ -20,7 +20,8 @@ pub fn start(app: AppHandle, refresh: fn(&AppHandle)) -> Result<(), String> {
     let mut watcher = notify::recommended_watcher(tx).map_err(|e| e.to_string())?;
     for (path, mode) in [
         (&p.app, RecursiveMode::Recursive),
-        (&p.runs, RecursiveMode::NonRecursive),
+        // its runs and what is pending now, also when one of them comes later
+        (&p.recorder, RecursiveMode::Recursive),
         (&p.projects, RecursiveMode::Recursive),
         (&p.leveldb, RecursiveMode::NonRecursive),
     ] {

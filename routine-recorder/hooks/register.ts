@@ -1,5 +1,9 @@
 import type { EngineInterface, Register } from 'claude-code'
 
+// Tells Pulse when any session stands before a person: a permission dialog or
+// a question of an MCP server, in ~/.claude/routine-recorder/pending/<sessionId>.json
+// while it lasts. Its name only: never the input of a tool or what is asked.
+//
 // Records each run of a scheduled routine into one JSON file per session,
 // ~/.claude/routine-recorder/runs/<sessionId>.json, which the routine
 // dashboard reads. A session becomes a routine run when a scheduled task
@@ -101,7 +105,15 @@ export function statusPrompt(isRoutine: boolean): string {
   ].join('\n')
 }
 
+// what stands before the person now: the tool it wants; a question of an MCP
+// server has no tool of its own (mcp__ stands for the call it came in); agent:
+// asked by a subagent, whose calls the session's transcript does not show
+export type Pending = { tool: string; at: number; agent?: string; asks?: true }
+
 type State = {
+  // what stands before the person now, oldest first: calls run side by side,
+  // and one that ends says nothing of another that still waits
+  pending: Pending[]
   loaded?: Promise<RunRecord | null>
   rec: RunRecord | null
   file: string
@@ -135,12 +147,47 @@ async function save($: $, s: State): Promise<void> {
   await s.saving
 }
 
+async function pendingFile($: $): Promise<string> {
+  return `${await $.env.get('HOME')}/.claude/routine-recorder/pending/${await $.session.id()}.json`
+}
+
+async function writePending($: $, s: State): Promise<void> {
+  try {
+    await $.fs.write(await pendingFile($), JSON.stringify(s.pending))
+  } catch {
+    // Pulse falls back on what the transcript shows, and trusts none of this
+    // once the call is over
+  }
+}
+
+// one entry a tool: a request can be told more than once
+async function addPending($: $, s: State, pending: Omit<Pending, 'at'>): Promise<void> {
+  if (s.pending.some(p => p.tool === pending.tool && p.agent === pending.agent)) return
+  s.pending.push({ ...pending, at: await $.clock.now() })
+  await writePending($, s)
+}
+
+// a call ended: what it asked for is answered, whatever the others wait for
+async function endCall($: $, s: State, tool: string): Promise<void> {
+  const at = s.pending.findIndex(p => p.tool === tool || (p.asks === true && tool.startsWith(p.tool)))
+  if (at === -1) return
+  s.pending.splice(at, 1)
+  await writePending($, s)
+}
+
+async function clearPending($: $, s: State, keep: (p: Pending) => boolean = () => false): Promise<void> {
+  const left = s.pending.filter(keep)
+  if (left.length === s.pending.length) return
+  s.pending = left
+  await writePending($, s)
+}
+
 function current(rec: RunRecord): Turn | undefined {
   return rec.turns.find(t => t.id === rec.activeTurnId) ?? rec.turns.at(-1)
 }
 
 export const register: Register = on => {
-  const s: State = { rec: null, file: '', saving: Promise.resolve() }
+  const s: State = { pending: [], rec: null, file: '', saving: Promise.resolve() }
 
   on('prompt.submit', async ($, e, next) => {
     try {
@@ -236,6 +283,21 @@ export const register: Register = on => {
     return next(e)
   })
 
+  on('classic.PermissionRequest', async ($, e, next) => {
+    await addPending($, s, { tool: e.tool_name, ...(e.agent_id === undefined ? {} : { agent: e.agent_id }) })
+    return next(e)
+  }).catch(($, e, next) => next(e))
+
+  on('classic.Elicitation', async ($, e, next) => {
+    await addPending($, s, { tool: 'mcp__', asks: true })
+    return next(e)
+  }).catch(($, e, next) => next(e))
+
+  on('classic.ElicitationResult', async ($, e, next) => {
+    await clearPending($, s, p => p.asks !== true)
+    return next(e)
+  }).catch(($, e, next) => next(e))
+
   on('tool.check', async ($, e, next) => {
     const verdict = await next(e)
     try {
@@ -263,7 +325,11 @@ export const register: Register = on => {
   on('tool.call', async ($, e, next) => {
     const rec = await ensure($, s)
     const turn = rec === null ? undefined : current(rec)
-    if (turn === undefined) return next(e)
+    if (turn === undefined) {
+      const ran = await next(e)
+      await endCall($, s, e.tool)
+      return ran
+    }
 
     try {
       turn.tools[e.tool] = (turn.tools[e.tool] ?? 0) + 1
@@ -277,6 +343,7 @@ export const register: Register = on => {
     }
 
     const ran = await next(e)
+    await endCall($, s, e.tool)
 
     try {
       const asked =
@@ -316,6 +383,7 @@ export const register: Register = on => {
   on('turn.complete', async ($, e, next) => {
     const done = await next(e)
     if (e.agentId !== undefined) return done
+    await clearPending($, s)
     try {
       const rec = await ensure($, s)
       const turn = rec?.turns.find(t => t.id === e.turnId)

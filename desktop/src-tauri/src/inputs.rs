@@ -9,18 +9,17 @@ use std::sync::{Arc, LazyLock, Mutex};
 use serde_json::{Map, Value};
 
 use crate::background::background_of;
+use crate::drift;
 use crate::live::{live_of, Live};
+use crate::pending::{pending_in, Pending};
 use crate::procs::{commands, Command};
+use crate::rules::limits::{ACTIVE_MS, LIVE_MS, WINDOW_MS};
 use crate::said::{said_of, Said};
 use crate::running::is_running;
 use crate::runs::{RunRecord, Summary};
 use crate::subagents::{subagents_of, SubagentView};
 use crate::unread::read_unread;
 use crate::util::{mtime_ms, now_ms, parse_time, paths, Paths};
-
-const DAY_MS: f64 = 24.0 * 3_600_000.0;
-// sessions older than this are left out, unless they still run
-pub const WINDOW_MS: f64 = 14.0 * DAY_MS;
 
 #[derive(Clone, Default)]
 pub struct Session {
@@ -75,6 +74,10 @@ pub struct Inputs {
     pub written: HashMap<String, f64>,
     // by session: the call that waits for the person's approval, since when
     pub awaiting: HashMap<String, (String, f64)>,
+    // by the session's id in its transcript's name: what the plugin saw stand
+    // before the person, and by session what of it is still open
+    pub reported: HashMap<String, Vec<Pending>>,
+    pub pending: HashMap<String, (String, f64)>,
     // by session: the question it puts to the person in the middle of its turn
     pub asking: HashMap<String, (String, f64)>,
     pub problems: Vec<String>,
@@ -98,6 +101,8 @@ impl Inputs {
             names: HashMap::new(),
             written: HashMap::new(),
             awaiting: HashMap::new(),
+            reported: HashMap::new(),
+            pending: HashMap::new(),
             asking: HashMap::new(),
             problems: Vec::new(),
         }
@@ -218,6 +223,9 @@ fn read_app(p: &Paths, inputs: &mut Inputs) -> std::io::Result<()> {
                         inputs.problems.push(format!("{} unreadable", file.name));
                         continue;
                     };
+                    if raw.get("scheduledTasks").is_none_or(|tasks| !tasks.is_array()) {
+                        inputs.problems.push("The Claude app changed its list of routines. Pulse needs an update.".into());
+                    }
                     inputs.tasks.extend(raw.get("scheduledTasks").and_then(Value::as_array).into_iter().flatten().filter_map(task));
                     for (id, list) in raw.get("recordedSkips").and_then(Value::as_object).into_iter().flatten() {
                         let ats = list.as_array().into_iter().flatten().filter_map(|s| s.get("at").and_then(Value::as_f64));
@@ -236,10 +244,66 @@ fn read_app(p: &Paths, inputs: &mut Inputs) -> std::io::Result<()> {
     Ok(())
 }
 
+// a session runs while its transcript's last real entry is not a turn's end,
+// while one of its subagents still works in the background, or while a
+// command, workflow or monitor it started in the background is open
+pub fn read_session(inputs: &mut Inputs, s: &Session, path: &Path) {
+    let now = inputs.now;
+    let Some(cli_id) = &s.cli_id else { return };
+    let agents = subagents_of(path, now);
+    let recent = s.last_activity.unwrap_or(0.0) > now - LIVE_MS;
+    let in_turn = recent && is_running(path, now, false);
+    // what runs in the background is open while its process runs, however old
+    let alive: HashSet<&str> = inputs.commands.iter().filter(|c| &c.session == cli_id).map(|c| c.id.as_str()).collect();
+    let background = background_of(path, now, &alive);
+    // a command of its own in the foreground: one the transcript does not name as background work
+    let has_process = alive.iter().any(|id| !background.names.contains_key(*id));
+    let is_alive = !alive.is_empty();
+    let waiting_on = background.open;
+    if is_alive {
+        inputs.names.insert(cli_id.clone(), background.names);
+        inputs.written.insert(cli_id.clone(), std::fs::metadata(path).map(|m| mtime_ms(&m)).unwrap_or(0.0));
+    }
+    if in_turn || agents.iter().any(|a| a.is_running) || !waiting_on.is_empty() {
+        inputs.running.insert(s.id.clone());
+        if in_turn {
+            inputs.in_turn.insert(s.id.clone());
+        }
+        if let Some(mut live) = live_of(path) {
+            if in_turn {
+                if let Some(question) = live.asks() {
+                    inputs.asking.insert(s.id.clone(), question);
+                } else if let Some(call) = inputs.reported.get(cli_id).and_then(|list| list.iter().rev().find_map(|p| live.pending(p))) {
+                    inputs.pending.insert(s.id.clone(), call);
+                } else if let Some(call) = live.awaiting(now, has_process) {
+                    inputs.awaiting.insert(s.id.clone(), call);
+                }
+            }
+            // the turn ended: what it waits for is the work in the background
+            // (a command, workflow or monitor, else its subagents)
+            if !in_turn {
+                live.tool = Some("in the background".into());
+                if let Some(task) = waiting_on.first() {
+                    let more = if waiting_on.len() > 1 { format!(" (+{})", waiting_on.len() - 1) } else { String::new() };
+                    live.tool = Some(format!("in the background · {}{more}", if task.what.is_empty() { "command" } else { &task.what }));
+                    live.turn_started = Some(task.started);
+                }
+            }
+            inputs.live.insert(s.id.clone(), live);
+        }
+    }
+    if !agents.is_empty() {
+        inputs.subagents.insert(s.id.clone(), agents);
+    }
+    if let Some(said) = said_of(path) {
+        inputs.said.insert(s.id.clone(), said);
+    }
+}
+
 pub fn load_inputs() -> Result<Inputs, String> {
     let p = paths()?;
     let now = now_ms();
-    let mut inputs = Inputs { commands: commands(now), ..Inputs::empty(now) };
+    let mut inputs = Inputs { commands: commands(now), reported: pending_in(&p.pending), ..Inputs::empty(now) };
     if read_app(&p, &mut inputs).is_err() {
         inputs.problems.push("The app's chat data was not found.".into());
     }
@@ -258,58 +322,23 @@ pub fn load_inputs() -> Result<Inputs, String> {
         Err(_) => inputs.problems.push("No records of the routine-recorder found.".into()),
     }
 
-    // a session runs while its transcript's last real entry is not a turn's
-    // end, while one of its subagents still works in the background, or while
-    // a command, workflow or monitor it started in the background is open
-    for s in &inputs.sessions {
-        let active = s.last_activity.unwrap_or(0.0) > now - 7.0 * DAY_MS;
-        let (Some(cli_id), false, true) = (&s.cli_id, s.archived, active) else { continue };
-        let Some(path) = transcript_of(&p.projects, cli_id, s.cwd.as_deref()) else { continue };
-        let agents = subagents_of(&path, now);
-        let recent = s.last_activity.unwrap_or(0.0) > now - 6.0 * 3_600_000.0;
-        let in_turn = recent && is_running(&path, now, false);
-        // what runs in the background is open while its process runs, however old
-        let alive: HashSet<&str> = inputs.commands.iter().filter(|c| &c.session == cli_id).map(|c| c.id.as_str()).collect();
-        let background = background_of(&path, now, &alive);
-        // a command of its own in the foreground: one the transcript does not name as background work
-        let has_process = alive.iter().any(|id| !background.names.contains_key(*id));
-        if !alive.is_empty() {
-            inputs.names.insert(cli_id.clone(), background.names);
-            inputs.written.insert(cli_id.clone(), std::fs::metadata(&path).map(|m| mtime_ms(&m)).unwrap_or(0.0));
-        }
-        let waiting_on = background.open;
-        if in_turn || agents.iter().any(|a| a.is_running) || !waiting_on.is_empty() {
-            inputs.running.insert(s.id.clone());
-            if in_turn {
-                inputs.in_turn.insert(s.id.clone());
-            }
-            if let Some(mut live) = live_of(&path) {
-                if in_turn {
-                    if let Some(question) = live.asks() {
-                        inputs.asking.insert(s.id.clone(), question);
-                    } else if let Some(call) = live.awaiting(now, has_process) {
-                        inputs.awaiting.insert(s.id.clone(), call);
-                    }
-                }
-                // the turn ended: what it waits for is the work in the background
-                // (a command, workflow or monitor, else its subagents)
-                if !in_turn {
-                    live.tool = Some("in the background".into());
-                    if let Some(task) = waiting_on.first() {
-                        let more = if waiting_on.len() > 1 { format!(" (+{})", waiting_on.len() - 1) } else { String::new() };
-                        live.tool = Some(format!("in the background · {}{more}", if task.what.is_empty() { "command" } else { &task.what }));
-                        live.turn_started = Some(task.started);
-                    }
-                }
-                inputs.live.insert(s.id.clone(), live);
+    let sessions = std::mem::take(&mut inputs.sessions);
+    let mut transcripts: Vec<(f64, PathBuf)> = Vec::new();
+    for s in &sessions {
+        let active = s.last_activity.unwrap_or(0.0) > now - ACTIVE_MS;
+        if !s.archived && active {
+            let path = s.cli_id.as_deref().and_then(|cli_id| transcript_of(&p.projects, cli_id, s.cwd.as_deref()));
+            if let Some(path) = path {
+                read_session(&mut inputs, s, &path);
+                transcripts.push((s.last_activity.unwrap_or(0.0), path));
             }
         }
-        if !agents.is_empty() {
-            inputs.subagents.insert(s.id.clone(), agents);
-        }
-        if let Some(said) = said_of(&path) {
-            inputs.said.insert(s.id.clone(), said);
-        }
+    }
+    inputs.sessions = sessions;
+    let changed = drift::sessions(&inputs.sessions, now, transcripts.len(), inputs.said.len());
+    inputs.problems.extend(changed);
+    if let Some((_, newest)) = transcripts.iter().max_by(|a, b| a.0.total_cmp(&b.0)) {
+        inputs.problems.extend(drift::transcript_file(newest));
     }
 
     // the commands of sessions not looked at above (archived, long quiet): what

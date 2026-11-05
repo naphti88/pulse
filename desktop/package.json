@@ -3,11 +3,11 @@
   "private": true,
   "description": "Pulse: a menu bar app in Tauri, the files read in Rust, the panel in ui/",
   "scripts": {
-    "setup": "npm install && npm --prefix ui install",
+    "setup": "npm install && npm --prefix ui install && git config core.hooksPath .githooks",
     "tauri": "tauri",
     "dev": "tauri dev",
     "build": "tauri build",
-    "test": "cargo test --manifest-path src-tauri/Cargo.toml",
+    "test": "cd src-tauri && cargo test && cd ../.. && python3 -I tools/test_check_private.py",
     "icons": "python3 make_icons.py && python3 make_tray.py && tauri icon src-tauri/icons/source.png"
   },
   "devDependencies": {

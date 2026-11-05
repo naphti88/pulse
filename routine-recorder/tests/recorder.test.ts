@@ -29,6 +29,41 @@ function world(on: On, answer: string) {
   return { files, contexts }
 }
 
+const PENDING = '/home/t/.claude/routine-recorder/pending/s1.json'
+const pendingOf = (files: Map<string, string>) => JSON.parse(files.get(PENDING) ?? 'null')
+
+test('what stands before the person is told while it lasts, by its name only', async ($, on) => {
+  const { files } = world(on, 'Fertig.\nSTATUS: worked | Fertig.')
+  on('classic.PermissionRequest', () => ({}))
+  on('classic.Elicitation', () => ({}))
+  on('classic.ElicitationResult', () => ({}))
+
+  await $.prompt.submit({ text: 'Mach das', wait: false, origin: { kind: 'user' } })
+  await $.turn.start({ text: '', turnId: 't1' })
+  await $.classic.PermissionRequest({ tool_name: 'mcp__mail__send', tool_input: { to: 'secret' } })
+  expect(pendingOf(files)).toEqual([{ tool: 'mcp__mail__send', at: 1000 }])
+  expect(files.get(PENDING)).not.toContain('secret')
+
+  // a call beside it ends: the request still stands
+  await $.tool.call({ tool: 'mcp__plan__update', tool_use_id: 'u0' })
+  expect(pendingOf(files)).toEqual([{ tool: 'mcp__mail__send', at: 1000 }])
+
+  // its own call goes on: nothing stands before the person any more
+  await $.tool.call({ tool: 'mcp__mail__send', tool_use_id: 'u1' })
+  expect(pendingOf(files)).toEqual([])
+
+  await $.classic.Elicitation({ mcp_server_name: 'mail', message: 'secret question' })
+  expect(pendingOf(files)).toEqual([{ tool: 'mcp__', asks: true, at: 1000 }])
+  expect(files.get(PENDING)).not.toContain('secret')
+  await $.classic.ElicitationResult({ mcp_server_name: 'mail' })
+  expect(pendingOf(files)).toEqual([])
+
+  await $.classic.PermissionRequest({ tool_name: 'Bash', agent_id: 'a1' })
+  expect(pendingOf(files)).toEqual([{ tool: 'Bash', agent: 'a1', at: 1000 }])
+  await $.turn.complete({ answer: '', durationMs: 5, isAborted: false, turnId: 't1', reason: 'answer' })
+  expect(pendingOf(files)).toEqual([])
+})
+
 const read = (files: Map<string, string>) => JSON.parse(files.get(FILE) ?? 'null') as RunRecord | null
 
 test('a routine run is recorded with its denial, ping and STATUS line', async ($, on) => {

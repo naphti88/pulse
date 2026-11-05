@@ -5,6 +5,7 @@
 mod background;
 mod checks;
 mod cron;
+mod drift;
 mod front;
 mod history;
 mod inputs;
@@ -12,10 +13,13 @@ mod items;
 mod live;
 mod notify;
 mod panel;
+mod pending;
 mod procs;
+mod rules;
 mod running;
 mod runs;
 mod said;
+mod scrub;
 mod settings;
 mod store;
 mod subagents;
@@ -189,6 +193,25 @@ fn open_chat(app: AppHandle, id: String) -> Result<(), String> {
     open(&[&format!("claude://claude.ai/epitaxy/{id}")])
 }
 
+// keeps the shape of what an item is now as a case, on this Mac (scrub.rs)
+#[tauri::command]
+async fn save_case(id: String) -> Result<String, String> {
+    if !is_app_id(&id) {
+        return Err("id".into());
+    }
+    let item = LAST.lock().expect("last").as_ref().and_then(|s| s.items.iter().find(|i| i.id == id).cloned()).ok_or("unknown session")?;
+    tauri::async_runtime::spawn_blocking(move || {
+        let inputs = inputs::load_inputs()?;
+        let session = inputs.sessions.iter().find(|s| s.id == id).ok_or("unknown session")?;
+        let cli_id = session.cli_id.as_deref().ok_or("no transcript")?;
+        let path = inputs::transcript_of(&util::paths()?.projects, cli_id, session.cwd.as_deref()).ok_or("no transcript")?;
+        let has_process = inputs.commands.iter().any(|c| c.session == cli_id);
+        scrub::save_case(&path, &item, has_process, inputs.now).map(|saved| saved.display().to_string())
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
 // a session the panel does not show now (archived, long quiet), as the Verlauf has it
 fn history_entry(id: &str) -> Option<history::Entry> {
     let inputs = inputs::load_inputs().ok()?;
@@ -295,7 +318,7 @@ fn main() {
     tauri::Builder::default()
         .plugin(tauri_plugin_autostart::init(MacosLauncher::LaunchAgent, None))
         .plugin(tauri_plugin_notification::init())
-        .invoke_handler(tauri::generate_handler![snapshot, mark, open_chat, set_pinned, set_compact, close_panel, panel_size, get_settings, set_settings, mark_command, history, is_placed, reset_place])
+        .invoke_handler(tauri::generate_handler![snapshot, mark, open_chat, save_case, set_pinned, set_compact, close_panel, panel_size, get_settings, set_settings, mark_command, history, is_placed, reset_place])
         .setup(|app| {
             // a menu bar app: no Dock icon, no app menu
             app.set_activation_policy(ActivationPolicy::Accessory);

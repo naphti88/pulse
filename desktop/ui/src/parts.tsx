@@ -1,7 +1,7 @@
-import { useEffect, useState } from 'react'
+import { Fragment, useEffect, useState } from 'react'
 import type { ReactNode } from 'react'
 
-import { mark, markCommand, openChat } from './api'
+import { mark, markCommand, openChat, saveCase } from './api'
 import { ageLevel, ago, clock, elapsed, since } from './format'
 import { Disc, Glyph, STATE_LABEL, markOf, typeOf } from './glyphs'
 import type { Mark, Type } from './glyphs'
@@ -98,12 +98,60 @@ export function Where({ project, from, children }: { project: string; from?: str
 // the title of the session an item came from, while the panel still has it
 export const fromOf = (item: { parentId?: string }, items: Item[]) => (item.parentId ? items.find(i => i.id === item.parentId)?.title : undefined)
 
+// why an item is what it is, as words to read or to hand on: the rules that
+// decided, those before them that did not hold, and what was known. A case
+// keeps none of what was said (src-tauri/src/scrub.rs) and stays on this Mac
+function WhyBox({ item }: { item: Item }) {
+  const { why } = item
+  const [note, setNote] = useState('')
+  const copy = () => {
+    const lines = [
+      `${item.title}: ${item.state}, ${item.stage}`,
+      `Rule: ${why.rule}. ${why.says}`,
+      `Stage: ${why.stageRule}. ${why.stageSays}`,
+      ...why.facts,
+      ...(why.passed.length > 0 ? [`Did not hold: ${why.passed.join(', ')}`] : []),
+    ]
+    navigator.clipboard.writeText(lines.join('\n')).then(() => setNote('Copied'), () => setNote('Could not copy'))
+  }
+  const save = () => {
+    saveCase(item.id).then(path => setNote(`Saved on this Mac: ${path.split('/').pop()}`), e => setNote(String(e)))
+  }
+  return (
+    <div className="why" onClick={e => e.stopPropagation()}>
+      <p>
+        <b>{why.rule}</b> {why.says}
+      </p>
+      <p>
+        <b>{why.stageRule}</b> {why.stageSays}
+      </p>
+      {why.facts.map(fact => (
+        <span key={fact} className="fact">
+          {fact}
+        </span>
+      ))}
+      {why.passed.length > 0 && <span className="fact passed">Did not hold: {why.passed.join(', ')}</span>}
+      <span className="why-acts">
+        <button className="link" onClick={copy}>
+          Copy
+        </button>
+        <button className="link" title="Keeps the shape of this turn and nothing that was said" onClick={save}>
+          Save case
+        </button>
+        <span className="note">{note}</span>
+      </span>
+    </div>
+  )
+}
+
 // an item as a row: what it wants and what it is, then title, folder and what
 // Claude said; a click opens its chat in Claude, on hover the marks take the
 // place of the age
 export function Row({ item, now, from }: { item: Item; now: number; from?: string }) {
   const isDone = item.stage === 'done'
+  const [why, setWhy] = useState(false)
   return (
+    <>
     <div className={`row ${isDone ? 'dim' : ''}`} title="Open in Claude" onClick={() => void openChat(item.id)}>
       <Disc mark={markOf(item)} type={typeOf(item)} alert={item.state === 'blocked' && item.stage === 'open'} />
       <b className="title" title={item.title}>
@@ -119,11 +167,14 @@ export function Row({ item, now, from }: { item: Item; now: number; from?: strin
           ) : (
             item.stage !== 'running' && <Action glyph="parked" label="Park: keep it in mind" onClick={() => void mark([item.id], 'park')} />
           )}
+          <Action glyph="why" label="Why is it here?" onClick={() => setWhy(w => !w)} />
         </span>
       </span>
       <Where project={item.project} from={from} />
       {item.stage !== 'running' && item.reason && <p title={item.reason}>{item.reason}</p>}
     </div>
+    {why && <WhyBox item={item} />}
+    </>
   )
 }
 
@@ -134,6 +185,7 @@ const SHOWN = 3
 // the first three, the rest on request, in the order they began
 export function RunCard({ items, now }: { items: Item[]; now: number }) {
   const [all, setAll] = useState(false)
+  const [why, setWhy] = useState<string | null>(null)
   if (items.length === 0) return null
   const sorted = items.slice().sort((a, b) => a.startedAt - b.startedAt || a.id.localeCompare(b.id))
   return (
@@ -141,10 +193,16 @@ export function RunCard({ items, now }: { items: Item[]; now: number }) {
       {(all ? sorted : sorted.slice(0, SHOWN)).map(i => {
         const agents = i.subagents.filter(a => a.isRunning).sort((a, b) => a.startedAt - b.startedAt)
         return (
-          <div key={i.id} className="row" title={`${i.title} · ${i.project}\nOpen in Claude`} onClick={() => void openChat(i.id)}>
+          <Fragment key={i.id}>
+          <div className="row" title={`${i.title} · ${i.project}\nOpen in Claude`} onClick={() => void openChat(i.id)}>
             <Disc mark="running" type={typeOf(i)} />
             <b className="title">{i.title}</b>
-            <span className="tm">{elapsed(i.live?.turnStarted ?? i.since, now)}</span>
+            <span className="right">
+              <span className="tm">{elapsed(i.live?.turnStarted ?? i.since, now)}</span>
+              <span className="acts">
+                <Action glyph="why" label="Why is it here?" onClick={() => setWhy(id => (id === i.id ? null : i.id))} />
+              </span>
+            </span>
             <Where project={i.project} from={fromOf(i, items)} />
             <span className="doing">▸ {i.live?.tool ?? 'thinking'}</span>
             {agents.map(a => (
@@ -158,6 +216,8 @@ export function RunCard({ items, now }: { items: Item[]; now: number }) {
               </span>
             ))}
           </div>
+          {why === i.id && <WhyBox item={i} />}
+          </Fragment>
         )
       })}
       {sorted.length > SHOWN && (

@@ -14,7 +14,9 @@ pub fn home() -> Result<PathBuf, String> {
 
 pub struct Paths {
     pub app: PathBuf,
+    pub recorder: PathBuf,
     pub runs: PathBuf,
+    pub pending: PathBuf,
     pub projects: PathBuf,
     pub leveldb: PathBuf,
 }
@@ -23,7 +25,9 @@ pub fn paths() -> Result<Paths, String> {
     let home = home()?;
     Ok(Paths {
         app: home.join("Library/Application Support/Claude/claude-code-sessions"),
+        recorder: home.join(".claude/routine-recorder"),
         runs: home.join(".claude/routine-recorder/runs"),
+        pending: home.join(".claude/routine-recorder/pending"),
         projects: home.join(".claude/projects"),
         leveldb: home.join("Library/Application Support/Claude/Local Storage/leveldb"),
     })
