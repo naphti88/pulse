@@ -1,7 +1,7 @@
 {
   "name": "routine-recorder",
-  "version": "0.2.2",
-  "description": "Records every scheduled-routine run (turns, tool calls, pings, permission decisions, STATUS line) to ~/.claude/routine-recorder/runs for Pulse, tells it when a session waits for an approval, and asks every session to end its answers with a STATUS line",
+  "version": "0.3.1",
+  "description": "Records every scheduled-routine run (turns, tool calls, pings, permission decisions, STATUS line) to ~/.claude/routine-recorder/runs for Pulse, tells it when a session waits for an approval or an API error ended a turn, and asks every session to end its answers with a STATUS line that the app does not show",
   "author": {
     "name": "naphti88"
   }

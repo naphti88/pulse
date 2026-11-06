@@ -4,6 +4,10 @@ import type { EngineInterface, Register } from 'claude-code'
 // a question of an MCP server, in ~/.claude/routine-recorder/pending/<sessionId>.json
 // while it lasts. Its name only: never the input of a tool or what is asked.
 //
+// Tells Pulse when an API error ended a turn, in
+// ~/.claude/routine-recorder/failed/<sessionId>.json until the next turn: the
+// kind of error only, never its text.
+//
 // Records each run of a scheduled routine into one JSON file per session,
 // ~/.claude/routine-recorder/runs/<sessionId>.json, which the routine
 // dashboard reads. A session becomes a routine run when a scheduled task
@@ -11,7 +15,8 @@ import type { EngineInterface, Register } from 'claude-code'
 // continuing in the run's chat) is recorded too, marked by who started it.
 // Every session, a routine run or not, is asked to end its answers with a
 // STATUS line (the Claude app shows HTML comments and markdown references,
-// so it is a plain line).
+// so it is a plain line). It stays in the transcript, where Pulse reads it, and
+// is taken off what the app shows of the answer (classic.MessageDisplay).
 
 type $ = EngineInterface
 
@@ -107,8 +112,11 @@ export function statusPrompt(isRoutine: boolean): string {
 
 // what stands before the person now: the tool it wants; a question of an MCP
 // server has no tool of its own (mcp__ stands for the call it came in); agent:
-// asked by a subagent, whose calls the session's transcript does not show
-export type Pending = { tool: string; at: number; agent?: string; asks?: true }
+// asked by a subagent, whose calls the session's transcript does not show;
+// checked: the engine only said the call must be asked for, and in auto mode a
+// classifier may still let it through by itself. The app's own dialogs (the
+// built-in browser) tell nothing else: neither the process nor a PermissionRequest
+export type Pending = { tool: string; at: number; agent?: string; asks?: true; checked?: true }
 
 type State = {
   // what stands before the person now, oldest first: calls run side by side,
@@ -173,6 +181,27 @@ async function endCall($: $, s: State, tool: string): Promise<void> {
   if (at === -1) return
   s.pending.splice(at, 1)
   await writePending($, s)
+}
+
+async function failedFile($: $): Promise<string> {
+  return `${await $.env.get('HOME')}/.claude/routine-recorder/failed/${await $.session.id()}.json`
+}
+
+async function clearFailed($: $): Promise<void> {
+  try {
+    const file = await failedFile($)
+    if (await $.fs.exists(file)) await $.fs.write(file, 'null')
+  } catch {
+    // a process that says it works outweighs this in Pulse
+  }
+}
+
+// an answer as it is shown: without the STATUS line it ends with; a line like
+// it anywhere else is part of what was said
+export function withoutStatus(text: string): string {
+  const lines = text.trimEnd().split('\n')
+  if ([...(lines.at(-1) ?? '').matchAll(STATUS_LINE)].length === 0) return text
+  return lines.slice(0, -1).join('\n').trimEnd()
 }
 
 async function clearPending($: $, s: State, keep: (p: Pending) => boolean = () => false): Promise<void> {
@@ -257,6 +286,7 @@ export const register: Register = on => {
 
   on('turn.start', async ($, e, next) => {
     if (e.agentId !== undefined) return next(e)
+    await clearFailed($)
     try {
       const rec = await ensure($, s)
       if (rec !== null) {
@@ -288,6 +318,25 @@ export const register: Register = on => {
     return next(e)
   }).catch(($, e, next) => next(e))
 
+  on('classic.StopFailure', async ($, e, next) => {
+    if (e.agent_id === undefined) {
+      try {
+        await $.fs.write(await failedFile($), JSON.stringify({ error: e.error, at: await $.clock.now() }))
+      } catch {
+        // Pulse then goes by the last answer
+      }
+    }
+    return next(e)
+  }).catch(($, e, next) => next(e))
+
+  // only what is shown: the stored answer and what the model reads keep the line
+  on('classic.MessageDisplay', async ($, e, next) => {
+    const done = await next(e)
+    if (!e.final) return done
+    const shown = withoutStatus(e.delta)
+    return shown === e.delta ? done : { ...done, displayContent: shown }
+  }).catch(($, e, next) => next(e))
+
   on('classic.Elicitation', async ($, e, next) => {
     await addPending($, s, { tool: 'mcp__', asks: true })
     return next(e)
@@ -300,6 +349,9 @@ export const register: Register = on => {
 
   on('tool.check', async ($, e, next) => {
     const verdict = await next(e)
+    if (verdict.decision === 'ask') {
+      await addPending($, s, { tool: e.tool, checked: true, ...(e.agentId === undefined ? {} : { agent: e.agentId }) })
+    }
     try {
       const rec = await ensure($, s)
       const turn = rec === null ? undefined : current(rec)

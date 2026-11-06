@@ -9,6 +9,7 @@
   --teal: #12a594;
   --slate: #6b7a99;
   --blue: #3e7bfa;
+  --claude: #d97757;
   --green: #30a46c;
   --grey: #8e8e93;
   --ink: #1d1d1f;
@@ -39,6 +40,7 @@
     --teal: #3dd5be;
     --slate: #9aa8c7;
     --blue: #5b9bff;
+    --claude: #e8926f;
     --green: #46c37b;
     --grey: #8b8b92;
     --ink: #f5f5f7;
@@ -128,13 +130,15 @@ button {
 .type { color: var(--faint); }
 
 @keyframes spin { to { transform: rotate(360deg); } }
+@keyframes think { 0%, 100% { transform: rotate(0deg) scale(0.72); } 50% { transform: rotate(45deg) scale(1.04); } }
 @keyframes pulse { 0%, 100% { opacity: 1; transform: scale(1); } 50% { opacity: 0.35; transform: scale(0.88); } }
 @keyframes halo { 0% { box-shadow: 0 0 0 0 color-mix(in srgb, var(--red) 50%, transparent); } 70%, 100% { box-shadow: 0 0 0 6px color-mix(in srgb, var(--red) 0%, transparent); } }
 @keyframes sweep { from { background-position: -100% 0; } to { background-position: 200% 0; } }
 .spin { animation: spin 1.2s linear infinite; }
+.think { animation: think 1.7s ease-in-out infinite; }
 .pulse { animation: pulse 1.2s ease-in-out infinite; }
 @media (prefers-reduced-motion: reduce) {
-  .spin, .pulse, .disc.alert, .card.run::before { animation: none !important; }
+  .spin, .think, .pulse, .disc.alert, .card.run::before { animation: none !important; }
 }
 
 /* the mark of an item: a disc in the colour of what it wants, the symbol of
@@ -945,3 +949,14 @@ button {
 .why .passed { font-family: var(--mono); font-size: 10.5px; color: var(--faint); }
 .why-acts { display: flex; align-items: center; gap: 12px; margin-top: 4px; }
 .why-acts .note { color: var(--faint); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+.doing.thinking {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  font-family: inherit;
+  color: var(--claude);
+}
+
+/* what a session changed that has not landed */
+.row p.work { color: var(--warn-ink); }

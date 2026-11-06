@@ -3,13 +3,14 @@
 // summary. One JSON file in the app's support folder.
 
 use std::collections::HashMap;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{LazyLock, Mutex};
 
 use serde::{Deserialize, Serialize};
 
 use crate::checks::Flag;
-use crate::util::home;
+use crate::util::{home, now_ms};
 
 #[derive(Serialize, Deserialize, Clone, Copy, PartialEq, Eq, Debug)]
 #[serde(rename_all = "lowercase")]
@@ -78,29 +79,130 @@ pub struct Store {
     pub panel_at: Option<[i32; 2]>,
 }
 
-pub static STORE: LazyLock<Mutex<Store>> = LazyLock::new(|| Mutex::new(load().unwrap_or_default()));
+// a file that could not be read says so once, for the panel's foot
+static PROBLEM: Mutex<Option<String>> = Mutex::new(None);
+// the file could be neither read nor kept: nothing may overwrite it
+static LOCKED: AtomicBool = AtomicBool::new(false);
+
+pub static STORE: LazyLock<Mutex<Store>> = LazyLock::new(|| Mutex::new(load()));
 
 fn path() -> Result<PathBuf, String> {
     Ok(home()?.join("Library/Application Support/local.claude-dashboard.pulse/state.json"))
 }
 
-fn load() -> Option<Store> {
-    let text = std::fs::read_to_string(path().ok()?).ok()?;
-    match serde_json::from_str(&text) {
-        Ok(store) => Some(store),
-        Err(error) => {
-            eprintln!("store: {error}");
-            None
-        }
+pub fn problem() -> Option<String> {
+    PROBLEM.lock().expect("store problem").clone()
+}
+
+fn load() -> Store {
+    let Ok(path) = path() else { return Store::default() };
+    let (store, read) = load_from(&path, now_ms() as i64);
+    if let Err(problem) = read {
+        eprintln!("store: {}", problem.text);
+        LOCKED.store(problem.locked, Ordering::SeqCst);
+        *PROBLEM.lock().expect("store problem") = Some(problem.text);
     }
+    store
+}
+
+struct LoadProblem {
+    text: String,
+    locked: bool,
+}
+
+// what cannot be read starts empty, and the next save would write over it:
+// marks and parked topics would be gone for good. So a file that cannot be
+// read is kept beside it first, and if even that fails nothing is saved
+fn load_from(path: &Path, now: i64) -> (Store, Result<(), LoadProblem>) {
+    let text = match std::fs::read(path) {
+        Ok(text) => text,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return (Store::default(), Ok(())),
+        Err(_) => {
+            let text = "Your marks could not be read. Pulse will not save any until that is solved.".to_string();
+            return (Store::default(), Err(LoadProblem { text, locked: true }));
+        }
+    };
+    if let Ok(store) = serde_json::from_slice(&text) {
+        return (store, Ok(()));
+    }
+    let kept = path.with_file_name(format!("state.broken-{now}.json"));
+    let problem = match std::fs::write(&kept, text) {
+        Ok(()) => LoadProblem { text: format!("Your marks could not be read and start empty. The old file is kept as {}.", kept.display()), locked: false },
+        Err(_) => LoadProblem { text: "Your marks could not be read. Pulse will not save any until that is solved.".to_string(), locked: true },
+    };
+    (Store::default(), Err(problem))
 }
 
 pub fn save(store: &Store) -> Result<(), String> {
-    let path = path()?;
+    if LOCKED.load(Ordering::SeqCst) {
+        return Err("The state file could not be read: nothing is saved over it.".into());
+    }
+    save_to(store, &path()?)
+}
+
+fn save_to(store: &Store, path: &Path) -> Result<(), String> {
     if let Some(dir) = path.parent() {
         std::fs::create_dir_all(dir).map_err(|e| e.to_string())?;
     }
     let tmp = path.with_extension("json.tmp");
     std::fs::write(&tmp, serde_json::to_vec_pretty(store).map_err(|e| e.to_string())?).map_err(|e| e.to_string())?;
-    std::fs::rename(&tmp, &path).map_err(|e| e.to_string())
+    std::fs::rename(&tmp, path).map_err(|e| e.to_string())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn folder(name: &str) -> PathBuf {
+        let dir = std::env::temp_dir().join(format!("pulse-store-{}-{name}", std::process::id()));
+        std::fs::create_dir_all(&dir).expect("dir");
+        dir
+    }
+
+    #[test]
+    fn a_file_that_is_not_there_is_a_first_start() {
+        let dir = folder("first");
+        let (store, read) = load_from(&dir.join("state.json"), 1);
+        assert!(read.is_ok() && store.marks.is_empty());
+        std::fs::remove_dir_all(&dir).expect("clean up");
+    }
+
+    #[test]
+    fn what_was_saved_comes_back() {
+        let dir = folder("back");
+        let path = dir.join("state.json");
+        let mut store = Store::default();
+        store.parked.insert("a".into(), Parked { at: 1.0, title: "RAM".into(), project: "shop-api".into(), said: "Stand".into() });
+        save_to(&store, &path).expect("saved");
+        let (back, read) = load_from(&path, 1);
+        assert!(read.is_ok());
+        assert_eq!(back.parked.get("a"), store.parked.get("a"));
+        std::fs::remove_dir_all(&dir).expect("clean up");
+    }
+
+    #[test]
+    fn a_file_that_cannot_be_read_is_kept_before_anything_is_saved_over_it() {
+        let dir = folder("broken");
+        let path = dir.join("state.json");
+        std::fs::write(&path, "{ not json, but your marks").expect("write");
+        let (store, read) = load_from(&path, 7);
+        let problem = read.err().expect("a problem");
+        assert!(store.marks.is_empty() && !problem.locked);
+        assert!(problem.text.contains("state.broken-7.json"));
+        // the next save writes over state.json: the copy stays
+        save_to(&Store::default(), &path).expect("saved");
+        assert_eq!(std::fs::read_to_string(dir.join("state.broken-7.json")).expect("kept"), "{ not json, but your marks");
+        std::fs::remove_dir_all(&dir).expect("clean up");
+    }
+
+    #[test]
+    fn a_file_that_cannot_be_kept_locks_saving() {
+        let dir = folder("locked");
+        // a folder where the file should be: it can be neither read nor copied
+        let path = dir.join("state.json");
+        std::fs::create_dir(&path).expect("dir");
+        let (_, read) = load_from(&path, 7);
+        assert!(read.err().expect("a problem").locked);
+        std::fs::remove_dir_all(&dir).expect("clean up");
+    }
 }

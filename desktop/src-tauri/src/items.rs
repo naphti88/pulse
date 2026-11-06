@@ -66,6 +66,8 @@ pub struct Item {
     // when the app last brought it on show
     #[serde(skip)]
     pub focused: f64,
+    // what it changed that has not landed, in words
+    pub work: Vec<String>,
     // which rules made it what it is
     pub why: Why,
 }
@@ -181,8 +183,12 @@ fn item_of(s: &Session, input: &Inputs, records: &HashMap<&str, &RunRecord>, tas
         refused: run.as_ref().is_some_and(|r| r.refused),
         quiet_shape: run.as_ref().is_some_and(|r| r.quiet_shape),
         asking: input.asking.get(&s.id).cloned(),
+        engine: input.engines.by_id.get(&s.id).map(|e| e.status.clone()),
+        engine_approval: input.engine_approval.get(&s.id).cloned(),
+        engine_question: input.engine_question.get(&s.id).cloned(),
         pending: input.pending.get(&s.id).cloned(),
         awaiting: input.awaiting.get(&s.id).cloned(),
+        failed: input.failed.get(&s.id).cloned(),
         ..Evidence::of(kind, s.summary.clone())
     };
     let (rule, passed) = decide_state(&evidence);
@@ -193,10 +199,15 @@ fn item_of(s: &Session, input: &Inputs, records: &HashMap<&str, &RunRecord>, tas
         Some(run) => (run.started_at, run.last_activity, run.reason(state, &s.summary)),
         None => (s.created_at.unwrap_or(activity), activity, s.summary.words(said.map(|said| said.text.clone()))),
     };
-    let (reason, since) = match (&evidence.asking, &evidence.pending, &evidence.awaiting) {
+    let approval = evidence.engine_approval.as_ref().or(evidence.pending.as_ref()).or(evidence.awaiting.as_ref());
+    let (reason, since) = match (&evidence.asking, &evidence.engine_question, approval) {
         (Some((question, at)), _, _) => (question.clone(), *at),
-        (None, Some((what, at)), _) | (None, None, Some((what, at))) => (format!("Waiting for approval: {what}"), *at),
-        (None, None, None) => (words, last_activity),
+        (None, _, Some((what, at))) if rule.gives == State::Blocked => (format!("Waiting for approval: {what}"), *at),
+        (None, Some((what, at)), _) => (format!("Waiting for your answer: {what}"), *at),
+        _ => match evidence.failed.as_ref().filter(|_| rule.id == "turn_failed") {
+            Some((what, at)) => (format!("Stopped: {what}"), *at),
+            None => (words, last_activity),
+        },
     };
 
     // parked by its last answer, unless taken up again in the panel since; or
@@ -211,6 +222,7 @@ fn item_of(s: &Session, input: &Inputs, records: &HashMap<&str, &RunRecord>, tas
         unread: input.unread.contains(&s.id),
         resumed,
         unseen: store.unseen.contains_key(&s.id),
+        work_left: input.work.contains_key(&s.id),
     };
     let (stage_rule, _) = decide_stage(&stage_evidence);
 
@@ -220,8 +232,10 @@ fn item_of(s: &Session, input: &Inputs, records: &HashMap<&str, &RunRecord>, tas
         (None, None) => task_id.map(clean_name).unwrap_or_else(|| s.id.clone()),
     };
     let folder = s.origin_cwd.as_deref().or(s.cwd.as_deref()).or(task.and_then(|t| t.cwd.as_deref())).unwrap_or("");
+    let work = input.work.get(&s.id).cloned().unwrap_or_default();
     let mut facts = evidence.facts(now);
     facts.extend(stage_evidence.facts());
+    facts.extend(work.iter().map(|note| format!("Not landed: {note}")));
     Item {
         id: s.id.clone(),
         title,
@@ -236,6 +250,7 @@ fn item_of(s: &Session, input: &Inputs, records: &HashMap<&str, &RunRecord>, tas
         live: input.live.get(&s.id).cloned(),
         subagents: input.subagents.get(&s.id).cloned().unwrap_or_default(),
         focused: s.last_focused.unwrap_or(0.0),
+        work,
         why: Why {
             rule: rule.id.to_string(),
             says: rule.says.to_string(),
@@ -414,6 +429,8 @@ mod tests {
             last_focused: None,
             task_id: None,
             parent_id: None,
+            written: Vec::new(),
+            prs: Vec::new(),
             summary: Summary::default(),
         }
     }

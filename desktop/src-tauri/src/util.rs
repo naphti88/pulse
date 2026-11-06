@@ -17,6 +17,8 @@ pub struct Paths {
     pub recorder: PathBuf,
     pub runs: PathBuf,
     pub pending: PathBuf,
+    pub failed: PathBuf,
+    pub engines: PathBuf,
     pub projects: PathBuf,
     pub leveldb: PathBuf,
 }
@@ -28,6 +30,8 @@ pub fn paths() -> Result<Paths, String> {
         recorder: home.join(".claude/routine-recorder"),
         runs: home.join(".claude/routine-recorder/runs"),
         pending: home.join(".claude/routine-recorder/pending"),
+        failed: home.join(".claude/routine-recorder/failed"),
+        engines: home.join(".claude/sessions"),
         projects: home.join(".claude/projects"),
         leveldb: home.join("Library/Application Support/Claude/Local Storage/leveldb"),
     })

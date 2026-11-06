@@ -243,7 +243,7 @@ mod tests {
         apply(&mut live, &line(PROMPT));
         apply(&mut live, &line(r#"{"type":"assistant","timestamp":"2026-10-30T10:00:01.000Z","message":{"content":[{"type":"tool_use","id":"m1","name":"mcp__mail__send","input":{}}]}}"#));
         let at = parse_time("2026-10-30T10:00:02.000Z").expect("time");
-        let request = |tool: &str| Pending { tool: tool.into(), at, agent: None, asks: false };
+        let request = |tool: &str| Pending { tool: tool.into(), at, agent: None, asks: false, checked: false };
         assert_eq!(live.pending(&request("mcp__mail__send")), Some(("mcp__mail__send".to_string(), at)));
         // another tool, or one from before this turn: no
         assert_eq!(live.pending(&request("Bash")), None);

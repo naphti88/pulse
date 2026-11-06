@@ -10,16 +10,20 @@ use serde_json::{Map, Value};
 
 use crate::background::background_of;
 use crate::drift;
+use crate::engine::{engines, Engine, Engines, INPUT_NEEDED};
+use crate::failed::{failed_in, in_words, Failed};
 use crate::live::{live_of, Live};
 use crate::pending::{pending_in, Pending};
 use crate::procs::{commands, Command};
-use crate::rules::limits::{ACTIVE_MS, LIVE_MS, WINDOW_MS};
+use crate::rules::limits::{ACTIVE_MS, LIVE_MS, PATIENCE_MS, WINDOW_MS};
+use crate::rules::SHELL;
 use crate::said::{said_of, Said};
 use crate::running::is_running;
 use crate::runs::{RunRecord, Summary};
 use crate::subagents::{subagents_of, SubagentView};
 use crate::unread::read_unread;
 use crate::util::{mtime_ms, now_ms, parse_time, paths, Paths};
+use crate::work;
 
 #[derive(Clone, Default)]
 pub struct Session {
@@ -27,6 +31,10 @@ pub struct Session {
     pub cli_id: Option<String>,
     pub title: Option<String>,
     pub cwd: Option<String>,
+    // the branches the app noted it wrote to (repository, branch) and the
+    // branches of its PRs
+    pub written: Vec<(String, String)>,
+    pub prs: Vec<String>,
     // the folder the session was started in; a worktree's session names its repository here
     pub origin_cwd: Option<String>,
     pub archived: bool,
@@ -76,8 +84,18 @@ pub struct Inputs {
     pub awaiting: HashMap<String, (String, f64)>,
     // by the session's id in its transcript's name: what the plugin saw stand
     // before the person, and by session what of it is still open
+    pub engines: Engines,
+    // by session: what the session itself says waits for the person, since when
+    pub engine_approval: HashMap<String, (String, f64)>,
+    pub engine_question: HashMap<String, (String, f64)>,
+    // by session: what it changed that has not landed, in words
+    pub work: HashMap<String, Vec<String>>,
     pub reported: HashMap<String, Vec<Pending>>,
     pub pending: HashMap<String, (String, f64)>,
+    // by the session's id in its transcript's name: the API error that ended
+    // its turn, and by session what of it still stands
+    pub stopped: HashMap<String, Failed>,
+    pub failed: HashMap<String, (String, f64)>,
     // by session: the question it puts to the person in the middle of its turn
     pub asking: HashMap<String, (String, f64)>,
     pub problems: Vec<String>,
@@ -101,8 +119,14 @@ impl Inputs {
             names: HashMap::new(),
             written: HashMap::new(),
             awaiting: HashMap::new(),
+            engines: Engines::default(),
+            engine_approval: HashMap::new(),
+            engine_question: HashMap::new(),
+            work: HashMap::new(),
             reported: HashMap::new(),
             pending: HashMap::new(),
+            stopped: HashMap::new(),
+            failed: HashMap::new(),
             asking: HashMap::new(),
             problems: Vec::new(),
         }
@@ -174,6 +198,10 @@ fn number(m: &Map<String, Value>, key: &str) -> Option<f64> {
 fn pick(raw: &Value) -> Option<Session> {
     let m = raw.as_object()?;
     let summary = m.get("postTurnSummary").and_then(Value::as_object);
+    let strings = |key: &str| m.get(key).and_then(Value::as_array).into_iter().flatten().filter_map(Value::as_str);
+    // "<repository>\0<branch>"
+    let written = strings("writtenBranches").filter_map(|w| w.split_once('\0')).map(|(dir, branch)| (dir.to_string(), branch.to_string())).collect();
+    let prs = m.get("prs").and_then(Value::as_array).into_iter().flatten().filter_map(|p| p.get("branch")?.as_str()).map(str::to_string).collect();
     let parent = m.get("spawnedFrom").and_then(Value::as_object).and_then(|s| string(s, "sessionId"));
     Some(Session {
         id: string(m, "sessionId")?,
@@ -187,6 +215,8 @@ fn pick(raw: &Value) -> Option<Session> {
         last_focused: number(m, "lastFocusedAt"),
         task_id: string(m, "scheduledTaskId"),
         parent_id: parent,
+        written,
+        prs,
         summary: Summary {
             category: summary.and_then(|s| string(s, "status_category")),
             detail: summary.and_then(|s| string(s, "status_detail")).unwrap_or_default(),
@@ -244,6 +274,14 @@ fn read_app(p: &Paths, inputs: &mut Inputs) -> std::io::Result<()> {
     Ok(())
 }
 
+// a report that still says something: a shell that runs was let through, and
+// what was only sent to be asked for takes as long as the classifier may, and
+// is over when the process has spoken since
+fn stands(report: &Pending, now: f64, has_process: bool, engine: Option<&Engine>) -> bool {
+    !(has_process && SHELL.contains(&report.tool.as_str()))
+        && (!report.checked || (now - report.at >= PATIENCE_MS && engine.is_none_or(|e| e.since <= report.at)))
+}
+
 // a session runs while its transcript's last real entry is not a turn's end,
 // while one of its subagents still works in the background, or while a
 // command, workflow or monitor it started in the background is open
@@ -252,7 +290,13 @@ pub fn read_session(inputs: &mut Inputs, s: &Session, path: &Path) {
     let Some(cli_id) = &s.cli_id else { return };
     let agents = subagents_of(path, now);
     let recent = s.last_activity.unwrap_or(0.0) > now - LIVE_MS;
-    let in_turn = recent && is_running(path, now, false);
+    // the session's own word; without a record of its process it cannot be in a
+    // turn; without any such records the transcript is all there is
+    let engine = inputs.engines.by_id.get(cli_id).or(inputs.engines.by_id.get(&s.id)).cloned();
+    let in_turn = match &engine {
+        Some(engine) => engine.is_in_turn(),
+        None => !inputs.engines.known && recent && is_running(path, now, false),
+    };
     // what runs in the background is open while its process runs, however old
     let alive: HashSet<&str> = inputs.commands.iter().filter(|c| &c.session == cli_id).map(|c| c.id.as_str()).collect();
     let background = background_of(path, now, &alive);
@@ -264,6 +308,9 @@ pub fn read_session(inputs: &mut Inputs, s: &Session, path: &Path) {
         inputs.names.insert(cli_id.clone(), background.names);
         inputs.written.insert(cli_id.clone(), std::fs::metadata(path).map(|m| mtime_ms(&m)).unwrap_or(0.0));
     }
+    if let Some(failed) = inputs.stopped.get(cli_id).filter(|_| !in_turn) {
+        inputs.failed.insert(s.id.clone(), (in_words(&failed.error).to_string(), failed.at));
+    }
     if in_turn || agents.iter().any(|a| a.is_running) || !waiting_on.is_empty() {
         inputs.running.insert(s.id.clone());
         if in_turn {
@@ -273,7 +320,15 @@ pub fn read_session(inputs: &mut Inputs, s: &Session, path: &Path) {
             if in_turn {
                 if let Some(question) = live.asks() {
                     inputs.asking.insert(s.id.clone(), question);
-                } else if let Some(call) = inputs.reported.get(cli_id).and_then(|list| list.iter().rev().find_map(|p| live.pending(p))) {
+                } else if let Some(engine) = engine.as_ref().filter(|e| e.is_waiting()) {
+                    let what = (live.tool.clone().unwrap_or_else(|| "a tool".into()), engine.since);
+                    let asks = engine.waiting_for.as_deref() == Some(INPUT_NEEDED);
+                    if asks { &mut inputs.engine_question } else { &mut inputs.engine_approval }.insert(s.id.clone(), what);
+                } else if let Some(call) = inputs.reported.get(cli_id).and_then(|list| {
+                    // its busy does not say nothing waits: the app asks for some
+                    // tools itself, and the process goes on saying busy
+                    list.iter().rev().filter(|p| stands(p, now, has_process, engine.as_ref())).find_map(|p| live.pending(p))
+                }) {
                     inputs.pending.insert(s.id.clone(), call);
                 } else if let Some(call) = live.awaiting(now, has_process) {
                     inputs.awaiting.insert(s.id.clone(), call);
@@ -303,7 +358,10 @@ pub fn read_session(inputs: &mut Inputs, s: &Session, path: &Path) {
 pub fn load_inputs() -> Result<Inputs, String> {
     let p = paths()?;
     let now = now_ms();
-    let mut inputs = Inputs { commands: commands(now), reported: pending_in(&p.pending), ..Inputs::empty(now) };
+    let mut inputs = Inputs { commands: commands(now), reported: pending_in(&p.pending), stopped: failed_in(&p.failed), engines: engines(&p.engines), ..Inputs::empty(now) };
+    if inputs.engines.changed {
+        inputs.problems.push("Claude Code changed its process records. Pulse needs an update.".into());
+    }
     if read_app(&p, &mut inputs).is_err() {
         inputs.problems.push("The app's chat data was not found.".into());
     }
@@ -324,17 +382,20 @@ pub fn load_inputs() -> Result<Inputs, String> {
 
     let sessions = std::mem::take(&mut inputs.sessions);
     let mut transcripts: Vec<(f64, PathBuf)> = Vec::new();
+    let mut by_session: HashMap<String, PathBuf> = HashMap::new();
     for s in &sessions {
         let active = s.last_activity.unwrap_or(0.0) > now - ACTIVE_MS;
         if !s.archived && active {
             let path = s.cli_id.as_deref().and_then(|cli_id| transcript_of(&p.projects, cli_id, s.cwd.as_deref()));
             if let Some(path) = path {
                 read_session(&mut inputs, s, &path);
+                by_session.insert(s.id.clone(), path.clone());
                 transcripts.push((s.last_activity.unwrap_or(0.0), path));
             }
         }
     }
     inputs.sessions = sessions;
+    inputs.work = work::left(&inputs.sessions, &by_session, &inputs.running, now);
     let changed = drift::sessions(&inputs.sessions, now, transcripts.len(), inputs.said.len());
     inputs.problems.extend(changed);
     if let Some((_, newest)) = transcripts.iter().max_by(|a, b| a.0.total_cmp(&b.0)) {
@@ -368,4 +429,24 @@ pub fn load_inputs() -> Result<Inputs, String> {
         }
     };
     Ok(inputs)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_report_stands_until_something_says_it_is_over() {
+        let report = |tool: &str, checked| Pending { tool: tool.into(), at: 1000.0, agent: None, asks: false, checked };
+        let engine = |since| Engine { status: "busy".into(), waiting_for: None, since };
+        let later = 1000.0 + PATIENCE_MS;
+        // the app's own dialog: the process said nothing since
+        assert!(stands(&report("mcp__Claude_Browser__preview_start", true), later, false, Some(&engine(500.0))));
+        // a classifier may still let it through, or did, and the process went on
+        assert!(!stands(&report("mcp__x__y", true), later - 1.0, false, Some(&engine(500.0))));
+        assert!(!stands(&report("mcp__x__y", true), later, false, Some(&engine(2000.0))));
+        // a shell that runs was let through, whatever was reported
+        assert!(!stands(&report("Bash", false), later, true, None));
+        assert!(stands(&report("Bash", false), later, false, None));
+    }
 }

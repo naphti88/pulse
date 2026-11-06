@@ -13,6 +13,8 @@ use std::path::{Path, PathBuf};
 use chrono::{TimeZone, Utc};
 use serde_json::{json, Map, Value};
 
+use crate::engine::Engine;
+use crate::failed::Failed;
 use crate::items::Item;
 use crate::live::is_prompt;
 use crate::said::status_of;
@@ -259,6 +261,8 @@ pub struct Options {
     // the last command it left in the background still runs
     pub process: Value,
     pub pending: Option<Value>,
+    pub engine: Option<Value>,
+    pub failed: Option<Value>,
     pub expect: Value,
 }
 
@@ -275,6 +279,12 @@ pub fn case_from(transcript: &Path, options: Options) -> Result<Value, String> {
     let mut case = json!({"ageMs": options.age_ms, "process": options.process, "expect": options.expect, "lines": scrubbed});
     if let Some(pending) = options.pending {
         case["pending"] = pending;
+    }
+    if let Some(engine) = options.engine {
+        case["engine"] = engine;
+    }
+    if let Some(failed) = options.failed {
+        case["failed"] = failed;
     }
     let mut problems = Vec::new();
     scrubber.allowed.problems(&case, "$", &mut problems);
@@ -294,10 +304,12 @@ fn last_time(transcript: &Path) -> Option<f64> {
 
 // writes a case of what an item is now where it stays on this Mac, outside any
 // repository; to become a test it has to be moved to testdata/ by hand
-pub fn save_case(transcript: &Path, item: &Item, has_process: bool, now: f64) -> Result<PathBuf, String> {
+pub fn save_case(transcript: &Path, item: &Item, has_process: bool, engine: Option<&Engine>, failed: Option<&Failed>, now: f64) -> Result<PathBuf, String> {
+    let engine = engine.map(|e| json!({"status": e.status, "waitingFor": e.waiting_for}));
+    let failed = failed.map(|f| json!({"error": f.error}));
     let expect = json!({"rule": item.why.rule, "state": item.state, "stage": item.stage});
     let age_ms = last_time(transcript).map_or(0.0, |at| (now - at).max(0.0));
-    let case = case_from(transcript, Options { until: None, age_ms, process: json!(has_process), pending: None, expect })?;
+    let case = case_from(transcript, Options { until: None, age_ms, process: json!(has_process), pending: None, engine, failed, expect })?;
     let dir = captures()?;
     std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
     let path = dir.join(format!("{}-{}.json", item.why.rule, now as i64));
@@ -391,6 +403,8 @@ mod tests {
 mod cases {
     use super::*;
     use crate::inputs::{read_session, Inputs, Session};
+    use crate::engine::Engine;
+use crate::failed::Failed;
     use crate::items::build;
     use crate::procs::Command;
     use crate::store::Store;
@@ -417,8 +431,19 @@ mod cases {
         if let Some(id) = process {
             inputs.commands.push(Command { session: name.into(), id, started: now, last_output: now, cpu: 0.0, hot_since: None, memory: 0, ports: Vec::new() });
         }
+        // a case with an engine: the records of the processes are there, and say this
+        if let Some(status) = case["engine"]["status"].as_str() {
+            inputs.engines.known = true;
+            if status != "none" {
+                let waiting_for = case["engine"]["waitingFor"].as_str().map(str::to_string);
+                inputs.engines.by_id.insert(name.to_string(), Engine { status: status.to_string(), waiting_for, since: now });
+            }
+        }
+        if let Some(error) = case["failed"]["error"].as_str() {
+            inputs.stopped.insert(name.to_string(), Failed { error: error.to_string(), at: now });
+        }
         if let Some(tool) = case["pending"]["tool"].as_str() {
-            let report = crate::pending::Pending { tool: tool.into(), at: now, agent: None, asks: false };
+            let report = crate::pending::Pending { tool: tool.into(), at: now, agent: None, asks: false, checked: false };
             inputs.reported.insert(name.to_string(), vec![report]);
         }
         read_session(&mut inputs, &session, &path);
@@ -470,6 +495,8 @@ mod cases {
                 age_ms: entry["ageMs"].as_f64().unwrap_or(0.0),
                 process: entry["process"].clone(),
                 pending: entry.get("pending").cloned().filter(|p| !p.is_null()),
+                engine: entry.get("engine").cloned().filter(|p| !p.is_null()),
+                failed: entry.get("failed").cloned().filter(|p| !p.is_null()),
                 expect,
             };
             let case = case_from(Path::new(&text("path")), options).expect("a case");

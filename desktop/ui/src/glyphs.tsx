@@ -10,6 +10,8 @@ const SVG: Record<string, string> = {
   review: `<path d="M1 9c2-3.8 4.8-5.6 8-5.6S15 5.2 17 9c-2 3.8-4.8 5.6-8 5.6S3 12.8 1 9z" fill="currentColor"/><circle cx="9" cy="9" r="3" fill="var(--knock)"/><circle cx="9" cy="9" r="1.5" fill="currentColor"/>`,
   running: `<circle cx="9" cy="9" r="6.6" fill="none" stroke="currentColor" stroke-opacity=".25" stroke-width="2.6"/><path d="M9 2.4a6.6 6.6 0 016.6 6.6" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round"/><circle cx="9" cy="9" r="2" fill="currentColor"/>`,
   commands: `<path d="M3.2 1.6h11.6M3.2 16.4h11.6" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/><path d="M4.8 2.4h8.4v2.4c0 1.7-1.3 3-3 4.2 1.7 1.2 3 2.5 3 4.2v2.4H4.8v-2.4c0-1.7 1.3-3 3-4.2-1.7-1.2-3-2.5-3-4.2z" fill="currentColor"/><path d="M6.5 4.1h5c-.1.5-.4 1-.8 1.4H7.3c-.4-.4-.7-.9-.8-1.4zM9 11c-1 .6-1.9 1.4-2.3 2.6v.5h4.6v-.5C10.9 12.4 10 11.6 9 11z" fill="var(--knock)"/>`,
+  // what a session does while it calls nothing: a spark, in Claude's colour
+  thinking: `<path d="M9 1.5v15M1.5 9h15M3.7 3.7l10.6 10.6M14.3 3.7L3.7 14.3" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"/>`,
   // a topic set aside
   parked: `<circle cx="9" cy="9" r="7.6" fill="currentColor"/><path d="M7 5.9v6.2M11 5.9v6.2" stroke="var(--knock)" stroke-width="2" stroke-linecap="round"/>`,
   // goes on again: the play to parked's pause

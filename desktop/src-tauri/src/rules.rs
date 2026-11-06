@@ -10,14 +10,18 @@
 // Which waits exist, and where each is told:
 //
 //   a choice or a plan put to the person   question_in_turn  (AskUserQuestion, ExitPlanMode)
-//   a permission dialog on any tool        approval_pending  (the plugin sees the dialog)
-//   an MCP server asks a question          approval_pending  (the plugin sees the request)
-//   a shell or file call left open         approval_guess    (without the plugin: limits::PATIENCE_MS)
+//   a permission dialog on any tool        engine_approval   (the session's own word, engine.rs)
+//   anything else that needs an answer     engine_question   (the session's own word)
+//   the same, and the app's own dialogs    approval_pending  (the plugin sees the call sent to
+//                                                             be asked for; the process stays busy)
+//   a shell or file call left open         approval_guess    (neither: limits::PATIENCE_MS)
 //
 // Herdr's manifest for Claude (src/detect/manifests/claude.toml in its
-// repository) was the checklist for these cases. Not told yet, because no
-// transcript or hook shows them: a network approval while a command runs, and
-// background MCP tasks.
+// repository) was the checklist for these cases, and agent-map showed where a
+// session states them itself. Background MCP tasks are not told yet: no
+// transcript shows them.
+//
+// A turn an API error ended is told by the plugin (failed.rs), turn_failed.
 
 use serde::Serialize;
 
@@ -48,6 +52,10 @@ pub mod limits {
     pub const PARK_GRACE_MS: f64 = 60_000.0;
     // activity this soon after what was on screen when it was marked still belongs to it
     pub const MARK_GRACE_MS: f64 = 15_000.0;
+    // how far back a session answers for work that has not landed
+    pub const WORK_WINDOW_MS: f64 = 3.0 * DAY_MS;
+    // how long what git said counts
+    pub const GIT_FRESH_MS: f64 = 120_000.0;
     // a run that was this small and said nothing found nothing to do
     pub const QUIET_RUN_TOOLS: f64 = 8.0;
     pub const QUIET_RUN_CHARS: usize = 200;
@@ -113,9 +121,15 @@ pub struct Evidence {
     pub refused: bool,
     // a run that did so little that it found nothing to do
     pub quiet_shape: bool,
+    // what the session's process says of itself, for the record
+    pub engine: Option<String>,
     pub asking: Option<Since>,
+    pub engine_approval: Option<Since>,
+    pub engine_question: Option<Since>,
     pub pending: Option<Since>,
     pub awaiting: Option<Since>,
+    // the API error that ended its last turn
+    pub failed: Option<Since>,
 }
 
 impl Evidence {
@@ -131,9 +145,13 @@ impl Evidence {
             has_record: false,
             refused: false,
             quiet_shape: false,
+            engine: None,
             asking: None,
+            engine_approval: None,
+            engine_question: None,
             pending: None,
             awaiting: None,
+            failed: None,
         }
     }
 
@@ -166,13 +184,17 @@ macro_rules! rule {
 }
 
 // from the top, the first that holds decides
-pub static STATE_RULES: [StateRule; 15] = [
+pub static STATE_RULES: [StateRule; 18] = [
     // a call that waits for the person holds the session up, whatever else is true
     rule!("question_in_turn", State::Waiting, "It put a choice or a plan to you in the middle of its turn.", |e| e.asking.is_some()),
+    rule!("engine_approval", State::Blocked, "The session says a permission prompt waits for you.", |e| e.engine_approval.is_some()),
+    rule!("engine_question", State::Waiting, "The session says it needs your input.", |e| e.engine_question.is_some()),
     rule!("approval_pending", State::Blocked, "The plugin saw a request for your approval that was not answered yet.", |e| e.pending.is_some()),
     rule!("approval_guess", State::Blocked, "A call stayed open too long without its process: it must wait for your approval.", |e| e.awaiting.is_some()),
     // a turn goes on, whatever was said before
     rule!("turn_open", State::Running, "Its transcript is in the middle of a turn.", |e| e.running && e.in_turn),
+    // an API error ended the turn: the last answer speaks of the round before
+    rule!("turn_failed", State::Blocked, "An API error ended its turn.", |e| e.failed.is_some()),
     // the turn ended; an answer that needs the person comes before work in the background
     rule!("background_work", State::Running, "Its turn ended, and work in the background goes on.", |e| e.running && !e.needs_person),
     rule!("record_open", State::Running, "The routine's record has a turn open.", |e| !e.is_chat() && e.record_open),
@@ -204,17 +226,23 @@ pub struct StageEvidence {
     pub resumed: bool,
     // an answer nobody was there for has no reader yet (items::sync_unseen)
     pub unseen: bool,
+    // what it changed has not landed (work.rs)
+    pub work_left: bool,
 }
 
 type StageRule = Rule<Stage, StageEvidence>;
 
-pub static STAGE_RULES: [StageRule; 8] = [
+pub static STAGE_RULES: [StageRule; 9] = [
     rule!("parked", Stage::Parked, "Set aside until it goes on.", |e| e.is_parked),
     rule!("running", Stage::Running, "It runs.", |e| e.state == State::Running),
     rule!("found_nothing", Stage::Done, "It found nothing to do.", |e| e.state == State::Quiet),
     rule!("marked_done", Stage::Done, "You closed it.", |e| e.mark == Some(MarkKind::Done)),
     // a result is only to be read: once opened in Claude it is done
     rule!("result_seen", Stage::Done, "A result you marked as read.", |e| e.state == State::Review && e.mark == Some(MarkKind::Seen)),
+    // read or not, a result whose work has not landed stays until it is closed
+    rule!("work_left", Stage::Open, "Its work has not landed: it stays until you close it.", |e| {
+        e.state == State::Review && e.mark.is_none() && e.work_left
+    }),
     rule!("result_read", Stage::Done, "A result the app has no unread dot for.", |e| {
         e.state == State::Review && e.mark.is_none() && !e.unread && !e.resumed && !e.unseen
     }),
@@ -267,11 +295,15 @@ impl Evidence {
         let mut facts = vec![
             format!("Turn open: {}", yes(self.in_turn)),
             format!("Running in any way: {}", yes(self.running)),
+            format!("The session says: {}", self.engine.as_deref().unwrap_or("no process")),
             format!("Said: {}", self.word.map_or("nothing", Word::as_str)),
         ];
         facts.extend(waits("Question", &self.asking));
+        facts.extend(waits("Permission prompt", &self.engine_approval));
+        facts.extend(waits("Input needed", &self.engine_question));
         facts.extend(waits("Approval seen by the plugin", &self.pending));
         facts.extend(waits("Call open", &self.awaiting));
+        facts.extend(waits("Stopped", &self.failed));
         if self.summary.category.is_some() || self.app_asks() {
             facts.push(format!("App: {}, asks you: {}", self.summary.category.as_deref().unwrap_or("not filed"), yes(self.app_asks())));
         }
@@ -303,7 +335,7 @@ mod tests {
         let names: Vec<&str> = STATE_RULES.iter().map(|r| r.id).chain(STAGE_RULES.iter().map(|r| r.id)).collect();
         assert_eq!(names.iter().collect::<HashSet<_>>().len(), names.len());
         assert_eq!(decide_state(&Evidence::of(Kind::Chat, Summary::default())).0.id, "result");
-        let stage = StageEvidence { state: State::Waiting, is_parked: false, mark: None, unread: false, resumed: false, unseen: false };
+        let stage = StageEvidence { state: State::Waiting, is_parked: false, mark: None, unread: false, resumed: false, unseen: false, work_left: false };
         assert_eq!(decide_stage(&stage).0.id, "open");
     }
 
@@ -316,11 +348,25 @@ mod tests {
         assert_eq!(decide_state(&e).0.id, "approval_guess");
         e.pending = Some(call.clone());
         assert_eq!(decide_state(&e).0.id, "approval_pending");
+        e.engine_question = Some(call.clone());
+        assert_eq!(decide_state(&e).0.id, "engine_question");
+        e.engine_approval = Some(call.clone());
+        assert_eq!(decide_state(&e).0.id, "engine_approval");
         e.asking = Some(call);
         let (rule, passed) = decide_state(&e);
         assert_eq!((rule.id, passed.len()), ("question_in_turn", 0));
         e.asking = None;
         assert_eq!(decide_state(&e).1, vec!["question_in_turn"]);
+    }
+
+    #[test]
+    fn a_result_stays_while_its_work_has_not_landed_until_it_is_closed() {
+        let mut e = StageEvidence { state: State::Review, is_parked: false, mark: None, unread: false, resumed: false, unseen: false, work_left: false };
+        assert_eq!(decide_stage(&e).0.id, "result_read");
+        e.work_left = true;
+        assert_eq!(decide_stage(&e).0.gives, Stage::Open);
+        e.mark = Some(MarkKind::Done);
+        assert_eq!(decide_stage(&e).0.id, "marked_done");
     }
 
     #[test]

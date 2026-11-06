@@ -33,6 +33,8 @@ export type Item = {
   parentId?: string
   live?: Live
   subagents: Subagent[]
+  // what it changed that has not landed, in words
+  work: string[]
   why: Why
 }
 

@@ -172,6 +172,7 @@ export function Row({ item, now, from }: { item: Item; now: number; from?: strin
       </span>
       <Where project={item.project} from={from} />
       {item.stage !== 'running' && item.reason && <p title={item.reason}>{item.reason}</p>}
+      {item.work.length > 0 && <p className="work">{item.work.join(' · ')}</p>}
     </div>
     {why && <WhyBox item={item} />}
     </>
@@ -204,7 +205,14 @@ export function RunCard({ items, now }: { items: Item[]; now: number }) {
               </span>
             </span>
             <Where project={i.project} from={fromOf(i, items)} />
-            <span className="doing">▸ {i.live?.tool ?? 'thinking'}</span>
+            {i.live?.tool ? (
+              <span className="doing">▸ {i.live.tool}</span>
+            ) : (
+              <span className="doing thinking">
+                <Glyph name="thinking" size={13} className="think" />
+                Thinking
+              </span>
+            )}
             {agents.map(a => (
               <span key={a.id} className="agent" style={{ marginLeft: Math.max(0, a.depth - 1) * 14 }} title={`${a.type || 'Subagent'}${a.isBackground ? ' in the background' : ''}\n${a.description}`}>
                 <Glyph name="agent" size={13} />

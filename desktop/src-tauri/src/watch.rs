@@ -22,6 +22,7 @@ pub fn start(app: AppHandle, refresh: fn(&AppHandle)) -> Result<(), String> {
         (&p.app, RecursiveMode::Recursive),
         // its runs and what is pending now, also when one of them comes later
         (&p.recorder, RecursiveMode::Recursive),
+        (&p.engines, RecursiveMode::NonRecursive),
         (&p.projects, RecursiveMode::Recursive),
         (&p.leveldb, RecursiveMode::NonRecursive),
     ] {

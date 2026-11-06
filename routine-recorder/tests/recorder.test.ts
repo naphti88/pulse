@@ -1,7 +1,7 @@
 import { expect, mock, test } from 'claude-code/testing'
 import type { On } from 'claude-code'
 
-import type { RunRecord } from '../hooks/register'
+import { withoutStatus, type RunRecord } from '../hooks/register'
 
 const FILE = '/home/t/.claude/routine-recorder/runs/s1.json'
 
@@ -155,4 +155,51 @@ test('a parked topic is recorded with what comes next', async ($, on) => {
   const turn = read(files)?.turns[0]
   expect(turn?.status).toBe('parked')
   expect(turn?.statusText).toBe('RAM-Messung steht, nächster Schritt: Profil des Workers.')
+})
+
+const FAILED = '/home/t/.claude/routine-recorder/failed/s1.json'
+
+test('an API error that ends a turn is told by its kind until the next turn', async ($, on) => {
+  const { files } = world(on, 'Fertig.\nSTATUS: worked | Fertig.')
+  on('classic.StopFailure', () => ({}))
+
+  await $.turn.start({ text: '', turnId: 't1' })
+  expect(files.has(FAILED)).toBe(false)
+  await $.classic.StopFailure({ error: 'rate_limit', error_details: 'secret', last_assistant_message: 'secret' })
+  expect(JSON.parse(files.get(FAILED) ?? 'null')).toEqual({ error: 'rate_limit', at: 1000 })
+  expect(files.get(FAILED)).not.toContain('secret')
+
+  await $.classic.StopFailure({ error: 'overloaded', agent_id: 'a1' })
+  expect(JSON.parse(files.get(FAILED) ?? 'null')).toEqual({ error: 'rate_limit', at: 1000 })
+
+  await $.turn.start({ text: '', turnId: 't2' })
+  expect(JSON.parse(files.get(FAILED) ?? '{}')).toBe(null)
+})
+
+test('what is shown of an answer leaves out the STATUS line it ends with', async ($, on) => {
+  expect(withoutStatus('Fertig.\n\nSTATUS: worked | Alles da.')).toBe('Fertig.')
+  expect(withoutStatus('Fertig.\n\nSTATUS: waiting | Eine Frage offen.\n')).toBe('Fertig.')
+  expect(withoutStatus('STATUS: idle | Nichts zu tun.')).toBe('')
+  expect(withoutStatus('Die Zeile `STATUS: worked` steht im Satz.')).toBe('Die Zeile `STATUS: worked` steht im Satz.')
+  const quoted = 'So sieht es aus:\nSTATUS: worked | Beispiel\n\nDanach geht es weiter.'
+  expect(withoutStatus(quoted)).toBe(quoted)
+
+  on('classic.MessageDisplay', () => ({}))
+  const end = { turn_id: 't1', message_id: 'm1', index: 0, final: true }
+  expect(await $.classic.MessageDisplay({ ...end, delta: 'Fertig.\n\nSTATUS: worked | Alles da.' })).toEqual({ displayContent: 'Fertig.' })
+  expect(await $.classic.MessageDisplay({ ...end, delta: 'Ohne Zeile.' })).toEqual({})
+  expect(await $.classic.MessageDisplay({ ...end, final: false, delta: 'STATUS: worked | Mitten drin' })).toEqual({})
+})
+
+test('a call the engine sends to be asked for is told, for the app to ask in its own dialog', async ($, on) => {
+  const { files } = world(on, 'Fertig.\nSTATUS: worked | Fertig.')
+
+  await $.prompt.submit({ text: 'Mach das', wait: false, origin: { kind: 'user' } })
+  await $.turn.start({ text: '', turnId: 't1' })
+  await $.tool.check({ tool: 'mcp__Claude_Browser__preview_start', input: { name: 'secret' }, tool_use_id: 'u1' })
+  expect(pendingOf(files)).toEqual([{ tool: 'mcp__Claude_Browser__preview_start', checked: true, at: 1000 }])
+  expect(files.get(PENDING)).not.toContain('secret')
+
+  await $.tool.call({ tool: 'mcp__Claude_Browser__preview_start', tool_use_id: 'u1' })
+  expect(pendingOf(files)).toEqual([])
 })

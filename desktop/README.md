@@ -86,17 +86,22 @@ running → open → done. Open is one of two kinds:
 Which kind it is the session says itself: the `routine-recorder` plugin asks
 every session to end each answer with a line `STATUS: worked|waiting|blocked|idle
 | one sentence` (worked is a result, waiting needs you, idle had nothing to
-do); the chat shows it, as it shows HTML comments and markdown references. Pulse reads it from the record of
+do); the plugin takes it off what the app shows of the answer (`classic.MessageDisplay`), the transcript keeps it. Pulse reads it from the record of
 a routine run or from the end of a chat's transcript; a chat from before that
 is filed by the app's own summary. A session that puts a choice or a plan to you in the middle of its turn asks
 you something, not runs. A session that waits for your approval of a call is
-blocked, not running. The plugin tells Pulse when a permission dialog or a
-question of an MCP server stands before you, for any tool, and the call being
-over ends it, whatever the plugin's file says. Without that report (an older
-plugin) it is a guess from the transcript: a shell command open for 30 s
-without its process, or an edit open as long (in auto mode a classifier looks
-at a command for 10 to 15 s before it runs, and the session goes on by itself
-whether it allows it or not).
+blocked, not running. That comes from the session itself: Claude Code keeps a
+record of every running process in `~/.claude/sessions`, with its status (busy,
+waiting, idle) and what it waits for (a permission prompt, input needed). A
+session with no live process cannot be in a turn, however its transcript ends.
+A busy does not prove that nothing waits: the app asks for some tools itself, the
+built-in browser for one, and the process goes on saying busy. So the plugin's
+report comes next (a permission dialog, a question of an MCP server, or a call the
+engine sent to be asked for that stayed open for 30 s; the call being over ends it),
+and without that a guess from the transcript: a shell command open for 30 s without its
+process, or an edit open as long (in auto mode a classifier looks at a command
+for 10 to 15 s before it runs, and the session goes on by itself whether it
+allows it or not).
 A session whose turn ended but that still
 has a command, workflow or monitor running in the background (or a background
 subagent) is running: it waits for that work and goes on when it is done;
@@ -104,6 +109,26 @@ unless its last answer said it waits for you, is blocked or parked, which
 comes first (the command shows under *Commands to check*). An
 item that changes after a mark is open again. Items without activity for 14
 days drop out.
+
+## Work that has not landed
+
+A session that says it is finished may have left its work behind. For the
+sessions of the last three days that do not run, Pulse asks git (on this Mac; it
+never fetches, commits or pushes) and shows what it finds on the line:
+
+- *n files not committed*: of the files this session edited itself, as a folder
+  is often shared and most of what is open there is not its own. A session in a
+  worktree of its own answers for all of it. A change made through a shell
+  command leaves no name in the transcript: such a file counts if it last changed
+  while a shell call of the session ran. What was deleted that way is not seen,
+  except in a worktree.
+- *n commits on x not pushed*, *x has no PR*: of the branches the app noted the
+  session wrote to. A PR counts whichever session opened it, a branch without
+  commits beyond the default branch has landed, and a repository without a
+  remote is left alone. What git knows of the remote dates from the last fetch.
+
+A result with such a line stays open after it was read, until you close it with
+*Done*: reading it settles nothing. Nothing stops you: *Done* closes it.
 
 ## How an item gets its state
 
@@ -149,7 +174,8 @@ Pulse reads files of the Claude app that are not a documented interface. An
 update would rarely fail outright: a field would stay empty and items go a
 little wrong. `src-tauri/src/drift.rs` looks at what comes in and says so in the
 panel's foot: a field gone from most sessions, transcripts no longer found, the
-shape of their entries changed, no STATUS line in any recent session. It only
+shape of their entries changed, process records without a status (`engine.rs`
+reports that), no STATUS line in any recent session. It only
 speaks with enough to go on, and never sends anything anywhere.
 
 ## Parking a topic
@@ -171,10 +197,14 @@ goes on or with *Unpark*, which puts it back in *Open*.
   dots (a copy of its localStorage LevelDB, at most every 20 s),
 - the transcripts and subagents in `~/.claude/projects` (only what was added
   since the last look, for a running session),
+- the records Claude Code keeps of its running processes in
+  `~/.claude/sessions`,
+- `git status` and the branches of the folders recent sessions worked in,
 - the runs the `routine-recorder` plugin writes to
   `~/.claude/routine-recorder/runs`, what it reports as waiting for you in
-  `~/.claude/routine-recorder/pending` (the name of a tool, nothing of its
-  input) and the STATUS comments it asks for (the plugin must stay installed).
+  `~/.claude/routine-recorder/failed` (the kind of API error that ended a turn,
+  never its text), `~/.claude/routine-recorder/pending` (the name of a tool, nothing of its
+  input) and the STATUS lines it asks for (the plugin must stay installed).
 
 It writes only its own state (marks, parked topics, what was notified, the
 last summary) to

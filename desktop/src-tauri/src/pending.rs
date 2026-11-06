@@ -1,5 +1,6 @@
-// What the plugin saw stand before a person: permission dialogs and questions
-// of an MCP server, a list in one file per session while they last. It is only a report:
+// What the plugin saw stand before a person: permission dialogs, questions of
+// an MCP server and calls the engine sent to be asked for, a list in one file
+// per session while they last. It is only a report:
 // the transcript has the last word, a call that is over waits for nobody,
 // whatever a file says (live.rs). Without the plugin there are no files, and
 // the rule approval_guess goes by what the transcript shows alone.
@@ -19,6 +20,10 @@ pub struct Pending {
     // a question of an MCP server, not a tool of its own: any MCP call it came in
     #[serde(default)]
     pub asks: bool,
+    // the engine only said the call must be asked for: in auto mode a classifier
+    // may let it through by itself, and no event says it did
+    #[serde(default)]
+    pub checked: bool,
 }
 
 // by session id; an empty list was answered
@@ -49,7 +54,7 @@ mod tests {
         std::fs::write(dir.join("c.json"), r#"[{"tool":"Bash","at":4},{"tool":"mcp__","at":6,"asks":true,"agent":"x"}]"#).expect("write");
         let found = pending_in(&dir);
         assert_eq!(found.len(), 2);
-        assert_eq!(found["a"], vec![Pending { tool: "Bash".into(), at: 5.0, agent: None, asks: false }]);
+        assert_eq!(found["a"], vec![Pending { tool: "Bash".into(), at: 5.0, agent: None, asks: false, checked: false }]);
         assert!(found["c"][1].asks);
         std::fs::remove_dir_all(&dir).expect("clean up");
         assert!(pending_in(&dir).is_empty());

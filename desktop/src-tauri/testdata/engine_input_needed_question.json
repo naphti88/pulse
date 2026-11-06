@@ -1,0 +1,62 @@
+{
+  "ageMs": 5000.0,
+  "engine": {
+    "status": "waiting",
+    "waitingFor": "input needed"
+  },
+  "expect": {
+    "rule": "question_in_turn",
+    "stage": "open",
+    "state": "waiting"
+  },
+  "lines": [
+    {
+      "message": {
+        "content": "…"
+      },
+      "timestamp": "2026-01-01T00:00:00.000Z",
+      "type": "user"
+    },
+    {
+      "timestamp": "2026-01-01T00:00:00.002Z",
+      "type": "attachment"
+    },
+    {
+      "type": "file-history-snapshot"
+    },
+    {
+      "message": {
+        "content": [
+          {
+            "text": "…",
+            "type": "text"
+          }
+        ]
+      },
+      "type": "other"
+    },
+    {
+      "timestamp": "2026-01-01T00:00:00.015Z",
+      "type": "other"
+    },
+    {
+      "type": "other"
+    },
+    {
+      "message": {
+        "content": [
+          {
+            "id": "t1",
+            "input": {},
+            "name": "AskUserQuestion",
+            "type": "tool_use"
+          }
+        ],
+        "stop_reason": "tool_use"
+      },
+      "timestamp": "2026-01-01T00:00:03.111Z",
+      "type": "assistant"
+    }
+  ],
+  "process": false
+}

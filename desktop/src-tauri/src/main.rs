@@ -6,6 +6,8 @@ mod background;
 mod checks;
 mod cron;
 mod drift;
+mod engine;
+mod failed;
 mod front;
 mod history;
 mod inputs;
@@ -27,6 +29,7 @@ mod tray;
 mod unread;
 mod util;
 mod watch;
+mod work;
 
 use std::process::Command;
 use std::sync::atomic::Ordering;
@@ -65,6 +68,7 @@ fn compute() -> Result<Snapshot, String> {
     if let Some(problem) = problem {
         snap.problems.push(format!("Settings unreadable, the defaults apply: {problem}"));
     }
+    snap.problems.extend(store::problem());
     snap.checks = checks::checks(&inputs, &snap.items, &settings, &store);
     snap.counts.commands = snap.checks.iter().filter(|c| c.flag.is_some() && !c.known).count();
     Ok(snap)
@@ -206,7 +210,7 @@ async fn save_case(id: String) -> Result<String, String> {
         let cli_id = session.cli_id.as_deref().ok_or("no transcript")?;
         let path = inputs::transcript_of(&util::paths()?.projects, cli_id, session.cwd.as_deref()).ok_or("no transcript")?;
         let has_process = inputs.commands.iter().any(|c| c.session == cli_id);
-        scrub::save_case(&path, &item, has_process, inputs.now).map(|saved| saved.display().to_string())
+        scrub::save_case(&path, &item, has_process, inputs.engines.by_id.get(cli_id), inputs.stopped.get(cli_id), inputs.now).map(|saved| saved.display().to_string())
     })
     .await
     .map_err(|e| e.to_string())?

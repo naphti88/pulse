@@ -1,0 +1,188 @@
+{
+  "ageMs": 5000.0,
+  "engine": {
+    "status": "waiting",
+    "waitingFor": "permission prompt"
+  },
+  "expect": {
+    "rule": "engine_approval",
+    "stage": "open",
+    "state": "blocked"
+  },
+  "lines": [
+    {
+      "message": {
+        "content": "…"
+      },
+      "timestamp": "2026-01-01T00:00:00.000Z",
+      "type": "user"
+    },
+    {
+      "timestamp": "2026-01-01T00:00:00.000Z",
+      "type": "attachment"
+    },
+    {
+      "timestamp": "2026-01-01T00:00:00.000Z",
+      "type": "attachment"
+    },
+    {
+      "timestamp": "2026-01-01T00:00:00.000Z",
+      "type": "attachment"
+    },
+    {
+      "timestamp": "2026-01-01T00:00:00.000Z",
+      "type": "attachment"
+    },
+    {
+      "timestamp": "2026-01-01T00:00:00.000Z",
+      "type": "attachment"
+    },
+    {
+      "timestamp": "2026-01-01T00:00:00.000Z",
+      "type": "attachment"
+    },
+    {
+      "timestamp": "2026-01-01T00:00:00.000Z",
+      "type": "attachment"
+    },
+    {
+      "timestamp": "2026-01-01T00:00:00.004Z",
+      "type": "attachment"
+    },
+    {
+      "type": "last-prompt"
+    },
+    {
+      "type": "other"
+    },
+    {
+      "type": "file-history-snapshot"
+    },
+    {
+      "type": "other"
+    },
+    {
+      "timestamp": "2026-01-01T00:00:00.019Z",
+      "type": "attachment"
+    },
+    {
+      "timestamp": "2026-01-01T00:00:00.019Z",
+      "type": "attachment"
+    },
+    {
+      "timestamp": "2026-01-01T00:00:00.020Z",
+      "type": "attachment"
+    },
+    {
+      "timestamp": "2026-01-01T00:00:00.020Z",
+      "type": "attachment"
+    },
+    {
+      "timestamp": "2026-01-01T00:00:00.021Z",
+      "type": "attachment"
+    },
+    {
+      "timestamp": "2026-01-01T00:00:00.050Z",
+      "type": "other"
+    },
+    {
+      "message": {
+        "content": [
+          {
+            "text": "…",
+            "type": "text"
+          },
+          {
+            "text": "…",
+            "type": "text"
+          },
+          {
+            "text": "…",
+            "type": "text"
+          }
+        ]
+      },
+      "type": "other"
+    },
+    {
+      "message": {
+        "content": [
+          {
+            "text": "…",
+            "type": "text"
+          }
+        ]
+      },
+      "type": "other"
+    },
+    {
+      "timestamp": "2026-01-01T00:00:00.050Z",
+      "type": "other"
+    },
+    {
+      "type": "last-prompt"
+    },
+    {
+      "type": "other"
+    },
+    {
+      "type": "other"
+    },
+    {
+      "type": "other"
+    },
+    {
+      "type": "custom-title"
+    },
+    {
+      "type": "other"
+    },
+    {
+      "type": "custom-title"
+    },
+    {
+      "type": "other"
+    },
+    {
+      "message": {
+        "content": [
+          {
+            "type": "thinking"
+          }
+        ],
+        "stop_reason": "tool_use"
+      },
+      "timestamp": "2026-01-01T00:00:05.327Z",
+      "type": "assistant"
+    },
+    {
+      "message": {
+        "content": [
+          {
+            "text": "…",
+            "type": "text"
+          }
+        ],
+        "stop_reason": "tool_use"
+      },
+      "timestamp": "2026-01-01T00:00:05.907Z",
+      "type": "assistant"
+    },
+    {
+      "message": {
+        "content": [
+          {
+            "id": "t1",
+            "input": {},
+            "name": "Bash",
+            "type": "tool_use"
+          }
+        ],
+        "stop_reason": "tool_use"
+      },
+      "timestamp": "2026-01-01T00:00:07.480Z",
+      "type": "assistant"
+    }
+  ],
+  "process": false
+}
