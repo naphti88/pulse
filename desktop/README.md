@@ -121,7 +121,10 @@ never fetches, commits or pushes) and shows what it finds on the line:
   worktree of its own answers for all of it. A change made through a shell
   command leaves no name in the transcript: such a file counts if it last changed
   while a shell call of the session ran. What was deleted that way is not seen,
-  except in a worktree.
+  except in a worktree. Every repository the session worked in counts, found
+  through the folders its shell went to and the files it edited; one that is not
+  its own folder is named (*n files not committed in x*), so a session started
+  above its repositories, in a folder of projects, answers for them too.
 - *n commits on x not pushed*, *x has no PR*: of the branches the app noted the
   session wrote to. A PR counts whichever session opened it, a branch without
   commits beyond the default branch has landed, and a repository without a

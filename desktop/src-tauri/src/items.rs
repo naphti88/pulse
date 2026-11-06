@@ -422,6 +422,7 @@ mod tests {
             cli_id: Some(format!("cli-{id}")),
             title: Some(format!("Chat {id}")),
             cwd: Some("/Users/x/Work/shop-api/.claude/worktrees/bold-x".into()),
+            folders: Vec::new(),
             origin_cwd: None,
             archived: false,
             created_at: Some(activity - H),

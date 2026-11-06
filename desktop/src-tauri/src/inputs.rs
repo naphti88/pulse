@@ -31,6 +31,8 @@ pub struct Session {
     pub cli_id: Option<String>,
     pub title: Option<String>,
     pub cwd: Option<String>,
+    // the folders the app noted its shell worked in
+    pub folders: Vec<String>,
     // the branches the app noted it wrote to (repository, branch) and the
     // branches of its PRs
     pub written: Vec<(String, String)>,
@@ -208,6 +210,7 @@ fn pick(raw: &Value) -> Option<Session> {
         cli_id: string(m, "cliSessionId"),
         title: string(m, "title"),
         cwd: string(m, "cwd"),
+        folders: strings("shellFolders").map(str::to_string).collect(),
         origin_cwd: string(m, "originCwd"),
         archived: m.get("isArchived") == Some(&Value::Bool(true)),
         created_at: number(m, "createdAt"),

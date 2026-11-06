@@ -4,12 +4,14 @@
 //
 // A folder is often shared by several sessions, and most of what is uncommitted
 // there is not theirs. So a session answers for the files it edited itself, and
-// a session in a worktree of its own for all of it. A command that changed files
-// through the shell leaves no name in the transcript: such a file counts for the
-// session if it last changed while a shell call of that session ran. What was
-// deleted that way leaves nothing to look at and is not seen, except in a
-// worktree. Branches come from what the app noted a session wrote to; a PR
-// counts for a branch whichever session opened it.
+// a session in a worktree of its own for all of it. It is looked for in every
+// repository it worked in: started above them, in a folder of projects, it would
+// answer for nothing otherwise. A command that changed files through the shell
+// leaves no name in the transcript: such a file counts for the session if it last
+// changed while a shell call of that session ran. What was deleted that way
+// leaves nothing to look at and is not seen, except in a worktree. Branches come
+// from what the app noted a session wrote to; a PR counts for a branch whichever
+// session opened it.
 
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
@@ -46,6 +48,7 @@ fn parse_status(text: &str) -> Vec<String> {
 
 #[derive(Clone, Default)]
 struct Repo {
+    root: String,
     // absolute
     dirty: Vec<String>,
     default_branch: Option<String>,
@@ -56,14 +59,15 @@ static REPOS: LazyLock<Mutex<HashMap<String, (f64, Option<Repo>)>>> = LazyLock::
 
 fn read_repo(dir: &str) -> Option<Repo> {
     let root = git(dir, &["rev-parse", "--show-toplevel"])?.trim().to_string();
-    let status = git(dir, &["status", "--porcelain", "-z"])?;
+    // file by file: by default a new folder is one entry, which is no file of anyone
+    let status = git(dir, &["status", "--porcelain", "-z", "--untracked-files=all"])?;
     let dirty = parse_status(&status).into_iter().map(|p| format!("{root}/{p}")).collect();
     let has_remote = git(dir, &["remote"]).is_some_and(|r| r.lines().any(|l| l == "origin"));
     let head = git(dir, &["symbolic-ref", "--short", "refs/remotes/origin/HEAD"]);
     let default_branch = head.and_then(|h| h.trim().strip_prefix("origin/").map(str::to_string)).or_else(|| {
         ["main", "master"].into_iter().find(|b| git(dir, &["rev-parse", "--verify", "-q", &format!("refs/remotes/origin/{b}")]).is_some()).map(str::to_string)
     });
-    Some(Repo { dirty, default_branch, has_remote })
+    Some(Repo { root, dirty, default_branch, has_remote })
 }
 
 fn repo_at(dir: &str, now: f64) -> Option<Repo> {
@@ -225,21 +229,41 @@ fn is_worktree(dir: &str) -> bool {
     dir.contains("/.claude/worktrees/")
 }
 
+fn holds(root: &str, dir: &str) -> bool {
+    dir.strip_prefix(root).is_some_and(|rest| rest.is_empty() || rest.starts_with('/'))
+}
+
+// the repositories a session worked in: its own folder, where its shell went and
+// where the files it edited lie. A folder of one already found costs no call to git.
+fn repos(s: &Session, seen: &Seen, now: f64) -> Vec<Repo> {
+    let mut edited: Vec<&str> = seen.files.iter().filter_map(|f| Path::new(f).parent()?.to_str()).collect();
+    edited.sort_unstable();
+    edited.dedup();
+    let mut found: Vec<Repo> = Vec::new();
+    for dir in s.cwd.iter().chain(&s.folders).map(String::as_str).chain(edited) {
+        if found.iter().any(|repo| holds(&repo.root, dir)) || !Path::new(dir).is_dir() {
+            continue;
+        }
+        found.extend(repo_at(dir, now).filter(|repo| !found.iter().any(|r| r.root == repo.root)));
+    }
+    found
+}
+
 fn notes(s: &Session, transcript: Option<&PathBuf>, with_pr: &HashSet<&str>, now: f64) -> Vec<String> {
     let mut out = Vec::new();
-    if let Some(dir) = s.cwd.as_deref().filter(|d| Path::new(d).is_dir()) {
-        if let Some(repo) = repo_at(dir, now) {
-            let files = if is_worktree(dir) {
-                repo.dirty.len()
-            } else if repo.dirty.is_empty() {
-                0
-            } else {
-                let seen = transcript.map(|t| touched(t)).unwrap_or_default();
-                repo.dirty.iter().filter(|p| seen.files.contains(*p) || seen.changed_by_shell(p)).count()
-            };
-            if files > 0 {
-                out.push(format!("{} not committed", plural(files, "file")));
-            }
+    let seen = transcript.map(|t| touched(t)).unwrap_or_default();
+    let home = s.cwd.as_deref();
+    for repo in repos(s, &seen, now) {
+        let at_home = home.is_some_and(|dir| holds(&repo.root, dir));
+        let files = if at_home && home.is_some_and(is_worktree) {
+            repo.dirty.len()
+        } else {
+            repo.dirty.iter().filter(|p| seen.files.contains(*p) || seen.changed_by_shell(p)).count()
+        };
+        if files > 0 {
+            let name = repo.root.rsplit('/').next().unwrap_or(&repo.root);
+            let place = if at_home { String::new() } else { format!(" in {name}") };
+            out.push(format!("{} not committed{place}", plural(files, "file")));
         }
     }
     for (dir, name) in &s.written {
@@ -398,5 +422,49 @@ mod tests {
         git.run("work", &["merge", "-q", "feature"]);
         git.run("work", &["push", "-q", "origin", "main"]);
         assert_eq!(notes_now(&HashSet::new(), 1.0 + 4.0 * GIT_FRESH_MS), vec!["1 file not committed"]);
+    }
+
+    #[test]
+    fn a_session_started_above_its_repositories_answers_in_them() {
+        let git = Git::new("above");
+        for repo in ["web", "docs", "other"] {
+            std::fs::create_dir_all(git.0.join(repo).join("src")).expect("dir");
+            git.run(repo, &["init", "-q", "-b", "main"]);
+            for file in ["src/mine.txt", "src/theirs.txt"] {
+                std::fs::write(git.0.join(repo).join(file), "x").expect("write");
+            }
+        }
+        let edit = |path: String| json!({"type": "assistant", "message": {"content": [{"type": "tool_use", "name": "Write", "input": {"file_path": path}}]}}).to_string();
+        let lines = [edit(format!("{}/src/mine.txt", git.path("web"))), edit(format!("{}/src/mine.txt", git.path("docs")))];
+        std::fs::write(git.0.join("t.jsonl"), lines.join("\n") + "\n").expect("transcript");
+
+        // web through the shell's folders, docs only through a file it edited,
+        // in neither what is not its own, and nothing of a repository it never went to
+        let above = Session {
+            id: "a".into(),
+            cwd: Some(git.path("")),
+            folders: vec![git.path("web/src"), git.path("web"), git.path("gone")],
+            ..Session::default()
+        };
+        let transcript = git.0.join("t.jsonl");
+        assert_eq!(notes(&above, Some(&transcript), &HashSet::new(), 1.0), vec!["1 file not committed in web", "1 file not committed in docs"]);
+
+        // in a worktree of its own it answers for all of it, not for all of
+        // another repository it went to
+        std::fs::create_dir_all(git.0.join("wt/.claude/worktrees/x")).expect("dir");
+        git.run("wt/.claude/worktrees/x", &["init", "-q", "-b", "main"]);
+        std::fs::write(git.0.join("wt/.claude/worktrees/x/a.txt"), "x").expect("write");
+        std::fs::write(git.0.join("wt/.claude/worktrees/x/b.txt"), "x").expect("write");
+        let in_worktree = Session {
+            id: "b".into(),
+            cwd: Some(git.path("wt/.claude/worktrees/x")),
+            folders: vec![git.path("other")],
+            ..Session::default()
+        };
+        assert_eq!(notes(&in_worktree, None, &HashSet::new(), 1.0), vec!["2 files not committed"]);
+
+        // a name that only begins like the repository is not in it
+        assert!(holds("/w/web", "/w/web/src") && holds("/w/web", "/w/web"));
+        assert!(!holds("/w/web", "/w/web-old"));
     }
 }
