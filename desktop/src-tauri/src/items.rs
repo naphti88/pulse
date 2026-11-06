@@ -8,7 +8,7 @@ use std::collections::HashMap;
 use serde::Serialize;
 
 use crate::checks::Check;
-use crate::cron::{self, DAY, HOUR, MINUTE};
+use crate::cron::{self, DAY, MINUTE};
 use crate::inputs::{Inputs, Session, TaskDef, WINDOW_MS};
 use crate::live::Live;
 use crate::runs::{run_state, RunRecord, RunState};
@@ -73,7 +73,7 @@ pub struct Planned {
     pub project: String,
     pub kind: Kind,
     pub at: f64,
-    // a routine that runs more than once in the window: how often, and the last time
+    // a routine that runs more than once that day: how often, and the last time
     pub count: usize,
     pub last: f64,
 }
@@ -296,7 +296,13 @@ pub fn build(input: &Inputs, store: &Store, tz: i64) -> Snapshot {
         .sessions
         .iter()
         // a parked topic stays, however old, archived or not
-        .filter(|s| input.running.contains(&s.id) || store.parked.contains_key(&s.id) || (!s.archived && s.last_activity.unwrap_or(0.0) > now - WINDOW_MS))
+        .filter(|s| {
+            input.running.contains(&s.id)
+                || input.awaiting.contains_key(&s.id)
+                || input.asking.contains_key(&s.id)
+                || store.parked.contains_key(&s.id)
+                || (!s.archived && s.last_activity.unwrap_or(0.0) > now - WINDOW_MS)
+        })
         .map(|s| item_of(s, input, &records, &tasks, store))
         .collect();
     items.sort_by(|a, b| b.since.total_cmp(&a.since));
@@ -304,13 +310,17 @@ pub fn build(input: &Inputs, store: &Store, tz: i64) -> Snapshot {
     let mut planned = Vec::new();
     let mut missed = Vec::new();
     let now_i = now as i64;
+    let day = |t: i64| (t + tz * MINUTE).div_euclid(DAY);
+    // The rest of today and all of tomorrow, in local days.
+    let planned_until = (day(now_i) + 2) * DAY - tz * MINUTE - 1;
     for task in input.tasks.iter().filter(|t| t.enabled) {
         let project = project_of(task.cwd.as_deref().unwrap_or(""));
         let title = clean_name(&task.name);
         if let Some(c) = task.cron.as_deref().and_then(cron::parse) {
-            let slots = c.slots_between(now_i + MINUTE, now_i + 36 * HOUR, tz);
-            if let (Some(&first), Some(&last)) = (slots.first(), slots.last()) {
-                planned.push(Planned { title: title.clone(), project: project.clone(), kind: Kind::Recurring, at: first as f64, count: slots.len(), last: last as f64 });
+            // Strictly after now: a run in its last minute is still to come.
+            let slots = c.slots_between(now_i + 1, planned_until, tz);
+            for runs in slots.chunk_by(|a, b| day(*a) == day(*b)) {
+                planned.push(Planned { title: title.clone(), project: project.clone(), kind: Kind::Recurring, at: runs[0] as f64, count: runs.len(), last: runs[runs.len() - 1] as f64 });
             }
             let mut starts: Vec<i64> = input.records.iter().filter(|r| r.task_id == task.id).map(|r| r.started_at as i64).collect();
             starts.extend(
@@ -406,6 +416,7 @@ pub fn sync_unseen(items: &[Item], before: &[Item], store: &mut Store, in_front:
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::cron::HOUR;
     use crate::runs::{Summary, Turn};
     use crate::said::Said;
     use crate::store::Mark;
@@ -654,9 +665,67 @@ mod tests {
     fn planned_runs_and_missed_slots() {
         // hourly at :05; no run in the last two days: every slot is missed
         let snap = build(&inputs(vec![], vec![], vec![task("hourly", "5 * * * *")]), &Store::default(), 60);
-        assert_eq!(snap.planned.len(), 1);
-        assert_eq!(snap.planned[0].count, 36);
+        assert_eq!(snap.planned.len(), 2);
+        assert_eq!(snap.planned[0].count, 5);
+        assert_eq!(snap.planned[0].at, timestamp("2026-10-14T19:05:00+01:00"));
+        assert_eq!(snap.planned[0].last, timestamp("2026-10-14T23:05:00+01:00"));
+        assert_eq!(snap.planned[1].count, 24);
+        assert_eq!(snap.planned[1].at, timestamp("2026-10-15T00:05:00+01:00"));
+        assert_eq!(snap.planned[1].last, timestamp("2026-10-15T23:05:00+01:00"));
         assert_eq!(snap.missed.len(), 48);
         assert_eq!(snap.planned[0].title, "hourly");
+    }
+
+    fn timestamp(value: &str) -> f64 {
+        chrono::DateTime::parse_from_rfc3339(value).unwrap().timestamp_millis() as f64
+    }
+
+    #[test]
+    fn daily_runs_are_separate_for_today_and_tomorrow() {
+        let snap = build(&inputs(vec![], vec![], vec![task("daily", "0 20 * * *")]), &Store::default(), 60);
+        assert_eq!(snap.planned.len(), 2);
+        for (planned, at) in snap.planned.iter().zip(["2026-10-14T20:00:00+01:00", "2026-10-15T20:00:00+01:00"]) {
+            assert_eq!(planned.count, 1);
+            assert_eq!(planned.at, timestamp(at));
+            assert_eq!(planned.last, planned.at);
+        }
+    }
+
+    #[test]
+    fn an_imminent_run_stays_planned_until_it_is_due() {
+        let mut input = inputs(vec![], vec![], vec![task("soon", "47 18 * * *")]);
+        let due = NOW + 20_000.0;
+        for now in [NOW, due - 1.0] {
+            input.now = now;
+            let snap = build(&input, &Store::default(), 60);
+            assert_eq!(snap.planned[0].at, due);
+        }
+        input.now = due;
+        let snap = build(&input, &Store::default(), 60);
+        assert_eq!(snap.planned[0].at, due + DAY as f64);
+    }
+
+    #[test]
+    fn planned_days_follow_local_midnight_and_include_all_of_tomorrow() {
+        for (before_midnight, tz) in [("2026-10-14T23:59:59+05:30", 330), ("2026-10-14T23:59:59-05:00", -300)] {
+            let mut input = inputs(vec![], vec![], vec![task("each-minute", "* * * * *")]);
+            input.now = timestamp(before_midnight);
+            let midnight = input.now + 1_000.0;
+            let snap = build(&input, &Store::default(), tz);
+            assert_eq!(snap.planned.len(), 1);
+            assert_eq!(snap.planned[0].count, 24 * 60);
+            assert_eq!(snap.planned[0].at, midnight);
+            assert_eq!(snap.planned[0].last, midnight + (DAY - MINUTE) as f64);
+
+            input.now = midnight;
+            let snap = build(&input, &Store::default(), tz);
+            assert_eq!(snap.planned.len(), 2);
+            assert_eq!(snap.planned[0].count, 24 * 60 - 1);
+            assert_eq!(snap.planned[0].at, midnight + MINUTE as f64);
+            assert_eq!(snap.planned[0].last, midnight + (DAY - MINUTE) as f64);
+            assert_eq!(snap.planned[1].count, 24 * 60);
+            assert_eq!(snap.planned[1].at, midnight + DAY as f64);
+            assert_eq!(snap.planned[1].last, midnight + (2 * DAY - MINUTE) as f64);
+        }
     }
 }

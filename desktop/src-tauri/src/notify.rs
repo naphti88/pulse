@@ -124,6 +124,22 @@ fn summary(app: &AppHandle, snap: &Snapshot, parked_weekly: bool) {
 
 // what to tell after a new snapshot; returns whether the store changed
 pub fn tell(app: &AppHandle, snap: &Snapshot, store: &mut Store, settings: &Settings) -> bool {
+    let mut changed = look(snap, store, settings, |title, body, session| send(app, title, body, session));
+    let now = Local::now();
+    let today = now.format("%Y-%m-%d").to_string();
+    if now.hour() * 60 + now.minute() >= settings.summary_at && store.last_summary.as_deref() != Some(today.as_str()) {
+        // off, the day still counts as summed up: turned on again it starts tomorrow
+        if settings.summary {
+            summary(app, snap, settings.parked_weekly);
+        }
+        store.last_summary = Some(today);
+        changed = true;
+    }
+    changed
+}
+
+// what is new or due for a reminder, each through toast; returns whether the store changed
+fn look(snap: &Snapshot, store: &mut Store, settings: &Settings, mut toast: impl FnMut(&str, &str, Option<&str>)) -> bool {
     let open: Vec<&Item> = snap.items.iter().filter(|i| i.stage == Stage::Open).collect();
     let before = store.told.len();
     let mut changed = false;
@@ -200,31 +216,20 @@ pub fn tell(app: &AppHandle, snap: &Snapshot, store: &mut Store, settings: &Sett
     let n = fresh.len() + reminders.len() + fresh_checks.len() + remind_checks.len();
     if n > AT_ONCE {
         let names = fresh.iter().chain(&reminders).map(|i| i.title.as_str()).chain(fresh_checks.iter().map(|c| c.0.what.as_str())).chain(remind_checks.iter().map(|c| c.0.what.as_str())).take(4).collect::<Vec<_>>().join(", ");
-        send(app, &format!("{n} items need you"), &names, None);
+        toast(&format!("{n} items need you"), &names, None);
     } else {
         for (check, flag) in &fresh_checks {
-            send(app, &format!("{}: {}", flag_label(*flag), check.what), &check_line(check), check.session_id.as_deref());
+            toast(&format!("{}: {}", flag_label(*flag), check.what), &check_line(check), check.session_id.as_deref());
         }
         for (check, flag, since) in &remind_checks {
-            send(app, &format!("For {}: {}", age_text(snap.now - since), check.what), &format!("{} · {}", flag_label(*flag), check_line(check)), check.session_id.as_deref());
+            toast(&format!("For {}: {}", age_text(snap.now - since), check.what), &format!("{} · {}", flag_label(*flag), check_line(check)), check.session_id.as_deref());
         }
         for item in &fresh {
-            send(app, &format!("{}: {}", label(item.state), item.title), &line(item), Some(&item.id));
+            toast(&format!("{}: {}", label(item.state), item.title), &line(item), Some(&item.id));
         }
         for item in &reminders {
-            send(app, &format!("Open for {}: {}", age_text(snap.now - item.since), item.title), &format!("{} · {}", label(item.state), line(item)), Some(&item.id));
+            toast(&format!("Open for {}: {}", age_text(snap.now - item.since), item.title), &format!("{} · {}", label(item.state), line(item)), Some(&item.id));
         }
-    }
-
-    let now = Local::now();
-    let today = now.format("%Y-%m-%d").to_string();
-    if now.hour() * 60 + now.minute() >= settings.summary_at && store.last_summary.as_deref() != Some(today.as_str()) {
-        // off, the day still counts as summed up: turned on again it starts tomorrow
-        if settings.summary {
-            summary(app, snap, settings.parked_weekly);
-        }
-        store.last_summary = Some(today);
-        changed = true;
     }
     changed
 }
@@ -254,5 +259,46 @@ mod tests {
         assert_eq!((reminders_for(h(23.0), &daily), reminders_for(h(49.0), &daily)), (0, 2));
         assert_eq!(age_text(h(5.5)), "5 h");
         assert_eq!(age_text(h(50.0)), "2 days");
+    }
+
+    fn started() -> Store {
+        Store { is_started: true, ..Store::default() }
+    }
+
+    #[test]
+    fn pending_transcripts_keep_their_reminders_across_refreshes_and_restart() {
+        use crate::inputs::tests::{PendingFixture, PENDING_AT};
+
+        let fixture = PendingFixture::new("Bash");
+        let mut store = started();
+        let mut check = |fixture: &PendingFixture, hours: f64, expected: usize| {
+            let input = fixture.load(PENDING_AT + hours * HOUR);
+            let snap = crate::items::build(&input, &store, 0);
+            let mut titles = Vec::new();
+            look(&snap, &mut store, &Settings::default(), |title, _, _| titles.push(title.to_string()));
+            assert_eq!(titles.len(), expected, "at {hours} hours: {titles:?}");
+            if hours < 7.0 * 24.0 {
+                assert_eq!((snap.items[0].state, snap.items[0].stage, snap.items[0].since), (State::Blocked, Stage::Open, PENDING_AT));
+            }
+        };
+        check(&fixture, 0.5 / 60.0, 1);
+        check(&fixture, 31.0 / 60.0, 0);
+        for hours in [2.0, 4.0, 12.0, 24.0, 48.0, 72.0, 144.0] {
+            check(&fixture, hours, 1);
+            check(&fixture, hours + 0.01, 0);
+        }
+        // New transcript path forces a cold read; persisted notification state
+        // must avoid a new Blocked toast when Pulse starts again.
+        let restarted = PendingFixture::new("Bash");
+        let mut store: Store = serde_json::from_str(&serde_json::to_string(&store).unwrap()).unwrap();
+        let snap = crate::items::build(&restarted.load(PENDING_AT + 145.0 * HOUR), &store, 0);
+        let mut titles = Vec::new();
+        look(&snap, &mut store, &Settings::default(), |title, _, _| titles.push(title.to_string()));
+        assert!(titles.is_empty());
+        let expired = crate::items::build(&restarted.load(PENDING_AT + 168.0 * HOUR), &store, 0);
+        look(&expired, &mut store, &Settings::default(), |title, _, _| titles.push(title.to_string()));
+        assert!(titles.is_empty());
+        assert_eq!(expired.items[0].stage, Stage::Done);
+        assert!(!store.told.contains_key("local_pending"));
     }
 }

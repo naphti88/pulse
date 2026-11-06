@@ -25,7 +25,8 @@ the panel (`ui/`, React) only draws.
   kind, its task, how long; three shown, the rest behind "+n more"); then
   what needs you, a card per state (in each what lies longer than 24 h on
   top, its age on red; below a rule, *Set aside*: *Later*, *Parked* and *Known*, each on a quieter card that its head folds). *Timeline* shows
-  today, now, what comes and what was missed, *History* every session the app
+  today, now, what comes and what was missed (recurring plans are grouped by
+  local day, through the end of tomorrow), *History* every session the app
   keeps, archived ones too, by its last activity and grouped by day, with
   what it said last (a search through title, folder and that sentence;
   sessions by default, routines on request; loaded when the tab opens). What
@@ -90,6 +91,12 @@ blocked, not running:
 a shell command open for 30 s without its process, or an edit open as long
 (in auto mode a classifier looks at a command for 10 to 15 s before it runs,
 and the session goes on by itself whether it allows it or not).
+Unanswered approvals, questions and plans remain open for up to seven
+days, including across Pulse restarts, until answered or the turn ends.
+This allows the hourly and daily reminders to fire. A crashed session can also
+appear to wait until that limit; **Done** dismisses it. A foreground command
+keeps an open turn running even when its transcript has been quiet for more
+than 30 minutes.
 A session whose turn ended but that still
 has a command, workflow or monitor running in the background (or a background
 subagent) is running: it waits for that work and goes on when it is done;

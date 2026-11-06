@@ -12,13 +12,16 @@ use crate::background::background_of;
 use crate::live::{live_of, Live};
 use crate::procs::{commands, Command};
 use crate::said::{said_of, Said};
-use crate::running::is_running;
+use crate::running::{turn_at, STALE_MS};
 use crate::runs::{RunRecord, Summary};
 use crate::subagents::{subagents_of, SubagentView};
 use crate::unread::read_unread;
 use crate::util::{mtime_ms, now_ms, parse_time, paths, Paths};
 
 const DAY_MS: f64 = 24.0 * 3_600_000.0;
+// An unanswered call may wait through the reminder ladder and several daily
+// reminders. Without a matching result, a crashed session can wait this long too.
+const PENDING_MS: f64 = 7.0 * DAY_MS;
 // sessions older than this are left out, unless they still run
 pub const WINDOW_MS: f64 = 14.0 * DAY_MS;
 
@@ -239,8 +242,12 @@ fn read_app(p: &Paths, inputs: &mut Inputs) -> std::io::Result<()> {
 pub fn load_inputs() -> Result<Inputs, String> {
     let p = paths()?;
     let now = now_ms();
-    let mut inputs = Inputs { commands: commands(now), ..Inputs::empty(now) };
-    if read_app(&p, &mut inputs).is_err() {
+    Ok(load_from(&p, now, commands(now)))
+}
+
+fn load_from(p: &Paths, now: f64, commands: Vec<Command>) -> Inputs {
+    let mut inputs = Inputs { commands, ..Inputs::empty(now) };
+    if read_app(p, &mut inputs).is_err() {
         inputs.problems.push("The app's chat data was not found.".into());
     }
     match entries(&p.runs) {
@@ -262,38 +269,49 @@ pub fn load_inputs() -> Result<Inputs, String> {
     // end, while one of its subagents still works in the background, or while
     // a command, workflow or monitor it started in the background is open
     for s in &inputs.sessions {
-        let active = s.last_activity.unwrap_or(0.0) > now - 7.0 * DAY_MS;
-        let (Some(cli_id), false, true) = (&s.cli_id, s.archived, active) else { continue };
+        let active = s.last_activity.unwrap_or(0.0) > now - PENDING_MS;
+        let (Some(cli_id), false) = (&s.cli_id, s.archived) else { continue };
+        // a session quiet for longer is not looked up, unless a command of its own still runs
+        if !active && !inputs.commands.iter().any(|c| &c.session == cli_id) {
+            continue;
+        }
         let Some(path) = transcript_of(&p.projects, cli_id, s.cwd.as_deref()) else { continue };
+        let open_at = turn_at(&path, false);
+        let pending = open_at.is_some_and(|at| now - at < PENDING_MS);
         let agents = subagents_of(&path, now);
         let recent = s.last_activity.unwrap_or(0.0) > now - 6.0 * 3_600_000.0;
-        let in_turn = recent && is_running(&path, now, false);
         // what runs in the background is open while its process runs, however old
         let alive: HashSet<&str> = inputs.commands.iter().filter(|c| &c.session == cli_id).map(|c| c.id.as_str()).collect();
         let background = background_of(&path, now, &alive);
         // a command of its own in the foreground: one the transcript does not name as background work
         let has_process = alive.iter().any(|id| !background.names.contains_key(*id));
+        // A foreground process also keeps a quiet turn running, including a
+        // command approved late. Explicit transcript endings still take priority.
+        let in_turn = open_at.is_some_and(|at| (recent && now - at < STALE_MS) || has_process);
         if !alive.is_empty() {
             inputs.names.insert(cli_id.clone(), background.names);
             inputs.written.insert(cli_id.clone(), std::fs::metadata(&path).map(|m| mtime_ms(&m)).unwrap_or(0.0));
         }
         let waiting_on = background.open;
-        if in_turn || agents.iter().any(|a| a.is_running) || !waiting_on.is_empty() {
+        let running = in_turn || agents.iter().any(|a| a.is_running) || !waiting_on.is_empty();
+        if running {
             inputs.running.insert(s.id.clone());
             if in_turn {
                 inputs.in_turn.insert(s.id.clone());
             }
+        }
+        if running || pending {
             if let Some(mut live) = live_of(&path) {
-                if in_turn {
-                    if let Some(question) = live.asks() {
+                if pending {
+                    if let Some(question) = live.asks().filter(|(_, since)| now - since < PENDING_MS) {
                         inputs.asking.insert(s.id.clone(), question);
-                    } else if let Some(call) = live.awaiting(now, has_process) {
+                    } else if let Some(call) = live.awaiting(now, has_process).filter(|(_, since)| now - since < PENDING_MS) {
                         inputs.awaiting.insert(s.id.clone(), call);
                     }
                 }
                 // the turn ended: what it waits for is the work in the background
                 // (a command, workflow or monitor, else its subagents)
-                if !in_turn {
+                if running && !in_turn {
                     live.tool = Some("in the background".into());
                     if let Some(task) = waiting_on.first() {
                         let more = if waiting_on.len() > 1 { format!(" (+{})", waiting_on.len() - 1) } else { String::new() };
@@ -301,7 +319,9 @@ pub fn load_inputs() -> Result<Inputs, String> {
                         live.turn_started = Some(task.started);
                     }
                 }
-                inputs.live.insert(s.id.clone(), live);
+                if running {
+                    inputs.live.insert(s.id.clone(), live);
+                }
             }
         }
         if !agents.is_empty() {
@@ -338,5 +358,150 @@ pub fn load_inputs() -> Result<Inputs, String> {
                 .collect()
         }
     };
-    Ok(inputs)
+    inputs
+}
+
+#[cfg(test)]
+pub(crate) mod tests {
+    use std::io::Write;
+    use std::sync::atomic::{AtomicU64, Ordering};
+
+    use super::*;
+    use crate::items::{build, Stage, State};
+    use crate::store::Store;
+
+    pub const PENDING_AT: f64 = 1_792_000_000_000.0;
+    const SESSION: &str = "local_pending";
+    static NEXT: AtomicU64 = AtomicU64::new(0);
+
+    // Only synthetic files and injected commands: no installed app or process
+    // scan is touched by these pipeline and notification tests.
+    pub struct PendingFixture {
+        root: PathBuf,
+        paths: Paths,
+        transcript: PathBuf,
+    }
+
+    impl PendingFixture {
+        pub fn new(tool: &str) -> Self {
+            let nonce = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos();
+            let root = std::env::temp_dir().join(format!("pulse-pending-{}-{nonce}-{}", std::process::id(), NEXT.fetch_add(1, Ordering::Relaxed)));
+            let paths = Paths { app: root.join("app"), runs: root.join("runs"), projects: root.join("projects"), leveldb: root.join("missing-leveldb") };
+            let sessions = paths.app.join("account/org");
+            std::fs::create_dir_all(&sessions).unwrap();
+            std::fs::create_dir_all(&paths.runs).unwrap();
+            std::fs::create_dir_all(paths.projects.join("project")).unwrap();
+            let raw = serde_json::json!({"sessionId": SESSION, "cliSessionId": "pending-cli", "title": "Pending approval", "cwd": "project",
+                "createdAt": PENDING_AT, "lastActivityAt": PENDING_AT, "lastFocusedAt": PENDING_AT,
+                "postTurnSummary": {"status_detail": "Previous work finished."}});
+            std::fs::write(sessions.join("local_pending.json"), raw.to_string()).unwrap();
+            let transcript = paths.projects.join("project/pending-cli.jsonl");
+            let fixture = Self { root, paths, transcript };
+            fixture.append(serde_json::json!({"type": "user", "message": {"role": "user", "content": "Run the tests."}}), PENDING_AT - 1_000.0);
+            fixture.append(serde_json::json!({"type": "assistant", "message": {"stop_reason": "tool_use", "content": [
+                {"type": "tool_use", "id": "call", "name": tool, "input": {"command": "make test", "questions": [{"question": "Proceed?"}]}}
+            ]}}), PENDING_AT);
+            fixture
+        }
+
+        fn append(&self, mut line: Value, at: f64) {
+            line["timestamp"] = chrono::DateTime::from_timestamp_millis(at as i64).unwrap().to_rfc3339().into();
+            let mut file = std::fs::OpenOptions::new().create(true).append(true).open(&self.transcript).unwrap();
+            writeln!(file, "{line}").unwrap();
+        }
+
+        pub fn load(&self, now: f64) -> Inputs {
+            self.with_commands(now, vec![])
+        }
+
+        fn with_commands(&self, now: f64, commands: Vec<Command>) -> Inputs {
+            load_from(&self.paths, now, commands)
+        }
+
+        fn command(&self) -> Command {
+            Command { session: "pending-cli".into(), id: "tests".into(), started: PENDING_AT, last_output: PENDING_AT, cpu: 0.0, hot_since: None, memory: 0, ports: vec![] }
+        }
+    }
+
+    impl Drop for PendingFixture {
+        fn drop(&mut self) {
+            let _ = std::fs::remove_dir_all(&self.root);
+        }
+    }
+
+    #[test]
+    fn pending_approvals_outlast_the_running_cutoffs() {
+        for tool in ["Bash", "PowerShell", "AskUserQuestion", "ExitPlanMode"] {
+            let fixture = PendingFixture::new(tool);
+            for age in [31.0 * 60_000.0, 121.0 * 60_000.0, 7.0 * 3_600_000.0, DAY_MS, PENDING_MS - 1.0] {
+                let input = fixture.load(PENDING_AT + age);
+                assert!(!input.running.contains(SESSION));
+                assert!(!input.live.contains_key(SESSION));
+                let snap = build(&input, &Store::default(), 0);
+                let item = snap.items.iter().find(|i| i.id == SESSION).expect("pending survives the quiet turn");
+                let question = matches!(tool, "AskUserQuestion" | "ExitPlanMode");
+                assert_eq!((item.state, item.stage, item.since), (if question { State::Waiting } else { State::Blocked }, Stage::Open, PENDING_AT));
+                if !question {
+                    assert_eq!(item.reason, format!("Waiting for approval: {tool} · make test"));
+                }
+            }
+            let expired = fixture.load(PENDING_AT + PENDING_MS);
+            assert!(expired.asking.is_empty() && expired.awaiting.is_empty());
+            // still in the window, but no longer waiting on anyone
+            assert_eq!(build(&expired, &Store::default(), 0).items[0].stage, Stage::Done);
+        }
+    }
+
+    #[test]
+    fn pending_input_clears_when_the_transcript_goes_on_or_ends() {
+        for event in [
+            serde_json::json!({"type": "user", "message": {"content": [{"type": "tool_result", "tool_use_id": "call", "content": "ok"}]}}),
+            serde_json::json!({"type": "user", "message": {"content": "A new request."}}),
+            serde_json::json!({"type": "user", "message": {"content": "[Request interrupted by user]"}}),
+            serde_json::json!({"type": "assistant", "message": {"stop_reason": "end_turn", "content": []}}),
+            serde_json::json!({"type": "system", "subtype": "stop_hook_summary"}),
+            serde_json::json!({"type": "system", "subtype": "api_error"}),
+            serde_json::json!({"type": "system", "subtype": "turn_duration"}),
+        ] {
+            let fixture = PendingFixture::new("Bash");
+            let now = PENDING_AT + 7.0 * 3_600_000.0;
+            assert!(fixture.load(now).awaiting.contains_key(SESSION));
+            fixture.append(event, now);
+            let input = fixture.load(now + 60_000.0);
+            assert!(input.awaiting.is_empty() && input.asking.is_empty());
+        }
+    }
+
+    #[test]
+    fn unrelated_activity_does_not_extend_a_pending_calls_seven_days() {
+        for tool in ["Bash", "AskUserQuestion", "ExitPlanMode"] {
+            let fixture = PendingFixture::new(tool);
+            let now = PENDING_AT + PENDING_MS;
+            fixture.append(serde_json::json!({"type": "assistant", "message": {"content": [
+                {"type": "text", "text": "Still waiting."}
+            ]}}), now - 1_000.0);
+            assert!(turn_at(&fixture.transcript, false).is_some());
+            let input = fixture.load(now);
+            assert!(input.asking.is_empty() && input.awaiting.is_empty());
+            assert_eq!(build(&input, &Store::default(), 0).items[0].stage, Stage::Done);
+        }
+    }
+
+    #[test]
+    fn a_late_approved_foreground_command_runs_until_its_turn_ends() {
+        let fixture = PendingFixture::new("Bash");
+        for age in [31.0 * 60_000.0, 7.0 * 3_600_000.0] {
+            let now = PENDING_AT + age;
+            assert!(fixture.load(now).awaiting.contains_key(SESSION));
+            let input = fixture.with_commands(now, vec![fixture.command()]);
+            assert!(input.awaiting.is_empty());
+            let snap = build(&input, &Store::default(), 0);
+            assert_eq!((snap.items[0].state, snap.items[0].stage), (State::Running, Stage::Running));
+        }
+        let now = PENDING_AT + DAY_MS;
+        fixture.append(serde_json::json!({"type": "assistant", "message": {"stop_reason": "end_turn", "content": []}}), now);
+        let input = fixture.with_commands(now, vec![fixture.command()]);
+        assert!(!input.running.contains(SESSION));
+        assert!(input.awaiting.is_empty());
+    }
 }
