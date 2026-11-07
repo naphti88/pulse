@@ -22,11 +22,20 @@ PROJECTS = HOME / ".claude" / "projects"
 RUNS = HOME / ".claude" / "routine-recorder" / "runs"
 
 TRIGGER = re.compile(r'^\s*<scheduled-task name="([^"]+)"(?: file="([^"]+)")?')
+# the plain line as asked for, or as a markdown reference ("[//]: # (...)")
+# or an HTML comment, as asked for for a while: each form with its own end,
+# so a plain line keeps a final ")", and a line with nothing after the word
+# takes nothing from the next line
 STATUS_LINE = re.compile(
-    r"^[ \t>*_`]*STATUS:\s*(idle|worked|waiting|blocked)\b\s*[|:–-]?\s*(.*?)[\s*_`]*$",
+    r"^[ \t>*_`]*(?:<!--\s*STATUS:\s*(idle|worked|waiting|blocked|parked)\b[^\S\r\n]*(?:[|:–]|-(?!->))?[^\S\r\n]*(.*?)\s*(?:-->)?"
+    r"|\[//\]:\s*#\s*\(\s*STATUS:\s*(idle|worked|waiting|blocked|parked)\b[^\S\r\n]*[|:–-]?[^\S\r\n]*(.*?)\s*\)?"
+    r"|STATUS:\s*(idle|worked|waiting|blocked|parked)\b[^\S\r\n]*[|:–-]?[^\S\r\n]*(.*?))[\s*_`]*$",
     re.I | re.M,
 )
-PING_LINE = re.compile(r"^[ \t>*_`]*PING:\s*(.+?)[\s*_`]*$", re.I | re.M)
+PING_LINE = re.compile(
+    r"^[ \t>*_`]*(?:<!--\s*PING:[^\S\r\n]*(\S.*?)\s*(?:-->)?|\[//\]:\s*#\s*\(\s*PING:[^\S\r\n]*(\S.*?)\s*\)?|PING:[^\S\r\n]*(\S.*?))[\s*_`]*$",
+    re.I | re.M,
+)
 PING_TOOL = re.compile(r"^PushNotification$|^mcp__.+__(send|post|notify|reply|chat_post)", re.I)
 WEBHOOK = re.compile(r"discord(?:app)?\.com/api/webhooks|hooks\.slack\.com", re.I)
 UNANSWERED_TEXT = re.compile(r"went unanswered", re.I)
@@ -110,11 +119,15 @@ def finish(turn, last_text, ended_at, end):
         turn["answerTail"] = last_text.strip()[-600:]
         statuses = list(STATUS_LINE.finditer(last_text))
         if statuses:
-            turn["status"] = statuses[-1].group(1).lower()
-            if statuses[-1].group(2).strip():
-                turn["statusText"] = statuses[-1].group(2).strip()
+            # the groups of the form that matched
+            last = statuses[-1]
+            turn["status"] = (last.group(1) or last.group(3) or last.group(5)).lower()
+            text = (last.group(2) or last.group(4) or last.group(6) or "").strip()
+            if text:
+                turn["statusText"] = text
         for ping in PING_LINE.finditer(last_text):
-            turn["pings"].append({"via": "PING line", "detail": ping.group(1)[:200], "at": ended_at})
+            detail = ping.group(1) or ping.group(2) or ping.group(3)
+            turn["pings"].append({"via": "PING line", "detail": detail[:200], "at": ended_at})
 
 
 def rebuild(path):
@@ -170,7 +183,9 @@ def rebuild(path):
                 tool_input = block.get("input") or {}
                 calls[block.get("id")] = name
                 turn["tools"][name] = turn["tools"].get(name, 0) + 1
-                command = tool_input.get("command", "") if name == "Bash" else ""
+                # a webhook posted from a shell: Bash, or PowerShell on Windows
+                command = tool_input.get("command", "") if name in ("Bash", "PowerShell") else ""
+                # a file sent to reach the person's phone pings them, as PushNotification does
                 proactive = name == "SendUserFile" and tool_input.get("status") == "proactive"
                 if PING_TOOL.search(name) or proactive or (command and WEBHOOK.search(command)):
                     detail = json.dumps({"tool": name, **tool_input}, ensure_ascii=False)[:200]
@@ -233,8 +248,15 @@ def rebuild(path):
 
 
 def main():
+    # piped or redirected on Windows, stdout writes the ANSI code page: a task
+    # name's character it lacks prints as "?" instead of stopping the run
+    # (pythonw's stdout is None, and IDLE's has no reconfigure)
+    if hasattr(sys.stdout, "reconfigure"):
+        sys.stdout.reconfigure(errors="replace")
     dry_run = "--dry-run" in sys.argv
-    RUNS.mkdir(parents=True, exist_ok=True)
+    # a dry run writes nothing, not even the folder
+    if not dry_run:
+        RUNS.mkdir(parents=True, exist_ok=True)
     written = kept = skipped = 0
     for path in sorted(PROJECTS.glob("*/*.jsonl")):
         if "<scheduled-task name=" not in path.read_text(encoding="utf-8", errors="replace"):

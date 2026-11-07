@@ -19,7 +19,7 @@ subprocess.run([CHROME, "--headless=new", "--disable-gpu", "--hide-scrollbars", 
                 "--window-size=400,80", f"--screenshot={SHEET}", (HERE / "assets/tray-sprite.html").as_uri()],
                check=True, capture_output=True)
 sheet = ImageOps.invert(Image.open(SHEET).convert("L"))
-for i, name in enumerate(["blocked", "waiting", "review", "commands", "done"]):
+for i, name in enumerate(["blocked", "waiting", "review", "commands", "done", "running"]):
     cell = sheet.crop((i * 40 + 3, 3, i * 40 + 33, 33))
     Image.merge("LA", (Image.new("L", cell.size, 255), cell)).save(OUT / f"{name}.png")
 for d in range(10):

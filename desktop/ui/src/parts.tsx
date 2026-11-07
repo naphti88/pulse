@@ -79,10 +79,15 @@ function Action({ glyph, label, onClick }: { glyph: Parameters<typeof Glyph>[0][
   )
 }
 
+// a Codex thread rather than a Claude session (its id: codex_ and the thread's UUID)
+export const isCodex = (id: string) => id.startsWith('codex_')
+export const appOf = (id: string) => (isCodex(id) ? 'Codex' : 'Claude')
+
 // where an item plays: its folder, and the session it came from when Claude started it
-export function Where({ project, from, children }: { project: string; from?: string; children?: ReactNode }) {
+export function Where({ project, from, id, children }: { project: string; from?: string; id?: string; children?: ReactNode }) {
   return (
     <span className="where">
+      {id && isCodex(id) && <span className="app">Codex</span>}
       {project && (
         <span className="folder">
           <Glyph name="folder" size={12} />
@@ -146,15 +151,16 @@ function WhyBox({ item }: { item: Item }) {
 
 // an item as a row: what it wants and what it is, then title, folder and what
 // Claude said; a click opens its chat in Claude, on hover the marks take the
-// place of the age
+// place of the age; title and text take their own direction (dir="auto"), so
+// one in Hebrew or Arabic is cut at its end, not its start
 export function Row({ item, now, from }: { item: Item; now: number; from?: string }) {
   const isDone = item.stage === 'done'
   const [why, setWhy] = useState(false)
   return (
     <>
-    <div className={`row ${isDone ? 'dim' : ''}`} title="Open in Claude" onClick={() => void openChat(item.id)}>
+    <div className={`row ${isDone ? 'dim' : ''}`} title={`Open in ${appOf(item.id)}`} onClick={() => void openChat(item.id)}>
       <Disc mark={markOf(item)} type={typeOf(item)} alert={item.state === 'blocked' && item.stage === 'open'} />
-      <b className="title" title={item.title}>
+      <b className="title" dir="auto" title={item.title}>
         {item.title}
       </b>
       <span className="right">
@@ -170,8 +176,8 @@ export function Row({ item, now, from }: { item: Item; now: number; from?: strin
           <Action glyph="why" label="Why is it here?" onClick={() => setWhy(w => !w)} />
         </span>
       </span>
-      <Where project={item.project} from={from} />
-      {item.stage !== 'running' && item.reason && <p title={item.reason}>{item.reason}</p>}
+      <Where project={item.project} from={from} id={item.id} />
+      {item.stage !== 'running' && item.reason && <p dir="auto" title={item.reason}>{item.reason}</p>}
       {item.work.length > 0 && <p className="work">{item.work.join(' · ')}</p>}
     </div>
     {why && <WhyBox item={item} />}
@@ -195,16 +201,16 @@ export function RunCard({ items, now }: { items: Item[]; now: number }) {
         const agents = i.subagents.filter(a => a.isRunning).sort((a, b) => a.startedAt - b.startedAt)
         return (
           <Fragment key={i.id}>
-          <div className="row" title={`${i.title} · ${i.project}\nOpen in Claude`} onClick={() => void openChat(i.id)}>
+          <div className="row" title={`${i.title}${i.project ? ` · ${i.project}` : ''}\nOpen in ${appOf(i.id)}`} onClick={() => void openChat(i.id)}>
             <Disc mark="running" type={typeOf(i)} />
-            <b className="title">{i.title}</b>
+            <b className="title" dir="auto">{i.title}</b>
             <span className="right">
               <span className="tm">{elapsed(i.live?.turnStarted ?? i.since, now)}</span>
               <span className="acts">
                 <Action glyph="why" label="Why is it here?" onClick={() => setWhy(id => (id === i.id ? null : i.id))} />
               </span>
             </span>
-            <Where project={i.project} from={fromOf(i, items)} />
+            <Where project={i.project} from={fromOf(i, items)} id={i.id} />
             {i.live?.tool ? (
               <span className="doing">▸ {i.live.tool}</span>
             ) : (
@@ -255,7 +261,8 @@ const FLAG_TITLE: Record<Flag, string> = {
 
 const megabytes = (bytes: number) => (bytes >= 1024 ** 3 ? `${(bytes / 1024 ** 3).toFixed(1)} GB` : `${Math.round(bytes / 1024 ** 2)} MB`)
 
-// a command worth a look: what it is and why, where it runs, what it uses
+// a command worth a look: what it is and why, where it runs, what it uses;
+// the command reads left to right, the session's title in its own direction
 export function CheckRow({ check, now }: { check: Check; now: number }) {
   const uses = [
     `running ${since(check.started, now)}`,
@@ -285,7 +292,7 @@ export function CheckRow({ check, now }: { check: Check; now: number }) {
         </span>
       </span>
       <Where project={check.project}>
-        <span className="from" title={check.title}>
+        <span className="from" dir="auto" title={check.title}>
           {check.title}
         </span>
       </Where>
@@ -295,13 +302,13 @@ export function CheckRow({ check, now }: { check: Check; now: number }) {
 }
 
 // a topic set aside: what it is, where it stands, since when; a click opens it
-// in Claude to look, and it stays parked until it is unparked or goes on; a
+// in its app to look, and it stays parked until it is unparked or goes on; a
 // note whose session is gone can only be dropped
 export function ParkedRow({ parked: p, now, type }: { parked: ParkedView; now: number; type?: Type }) {
   return (
-    <div className={`row ${p.gone ? 'dim' : ''}`} title={p.gone ? 'The app no longer has this session' : 'Open in Claude'} onClick={() => !p.gone && void openChat(p.id)}>
+    <div className={`row ${p.gone ? 'dim' : ''}`} title={p.gone ? 'The app no longer has this session' : `Open in ${appOf(p.id)}`} onClick={() => !p.gone && void openChat(p.id)}>
       <Disc mark="parked" type={type} />
-      <b className="title" title={p.title}>
+      <b className="title" dir="auto" title={p.title}>
         {p.title}
       </b>
       <span className="right">
@@ -316,8 +323,8 @@ export function ParkedRow({ parked: p, now, type }: { parked: ParkedView; now: n
           )}
         </span>
       </span>
-      <Where project={p.project}>{p.gone && <span className="from">session gone</span>}</Where>
-      {p.said && <p title={p.said}>{p.said}</p>}
+      <Where project={p.project} id={p.id}>{p.gone && <span className="from">session gone</span>}</Where>
+      {p.said && <p dir="auto" title={p.said}>{p.said}</p>}
     </div>
   )
 }

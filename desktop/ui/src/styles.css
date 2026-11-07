@@ -29,7 +29,7 @@
   --warn-bg: #fdf0d5;
   --warn-ink: #8a5a00;
   --link: #0a63d8;
-  --mono: ui-monospace, 'SF Mono', SFMono-Regular, Menlo, monospace;
+  --mono: ui-monospace, 'SF Mono', SFMono-Regular, Menlo, Consolas, monospace;
   color-scheme: light dark;
 }
 @media (prefers-color-scheme: dark) {
@@ -63,6 +63,17 @@
     --link: #6aa8ff;
   }
 }
+/* on Windows the acrylic is thin and shows what lies behind it: over a dark
+   window the head, the tabs and the foot turn grey on grey, so there the
+   panel lays a ground of its own on it, almost opaque, in both themes */
+:root.win {
+  --ground: rgba(243, 243, 245, 0.94);
+}
+@media (prefers-color-scheme: dark) {
+  :root.win {
+    --ground: rgba(6, 6, 8, 0.9);
+  }
+}
 
 * {
   box-sizing: border-box;
@@ -74,7 +85,7 @@ body {
   overflow: hidden;
 }
 body {
-  font: 13px/1.38 -apple-system, BlinkMacSystemFont, sans-serif;
+  font: 13px/1.38 -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
   color: var(--ink);
   -webkit-user-select: none;
   user-select: none;
@@ -96,6 +107,11 @@ button {
   flex-direction: column;
   border-radius: 14px;
   background: var(--ground);
+}
+/* Windows rounds the window itself, and less: a radius of the page's own
+   would leave the bare material in the corners */
+:root.win .panel {
+  border-radius: 0;
 }
 
 /* symbols and their colours */
@@ -417,6 +433,8 @@ button {
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+  /* by the disc, also when it reads right to left */
+  text-align: left;
 }
 .where {
   grid-column: 2 / 4;
@@ -709,6 +727,19 @@ button {
   overflow: hidden;
   text-overflow: ellipsis;
 }
+/* on the light ground of Windows the amber is too pale to read: there a
+   problem in the foot, and the count of questions in the head, take the ink of
+   the warnings */
+:root.win .problem,
+:root.win .cnt.s-waiting {
+  color: var(--warn-ink);
+}
+@media (prefers-color-scheme: dark) {
+  :root.win .problem,
+  :root.win .cnt.s-waiting {
+    color: var(--amber);
+  }
+}
 
 /* Einstellungen: the notifications on the Mac */
 .settings {
@@ -849,6 +880,13 @@ button {
   align-items: center;
   gap: 6px;
 }
+/* two choices beside one label, one above the other */
+.st-checks {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 4px;
+}
 
 /* a command worth a look */
 .flag {
@@ -929,6 +967,15 @@ button {
 .seg button.on {
   background: var(--seg-on);
   box-shadow: 0 1px 2px rgba(0, 0, 0, 0.12);
+}
+.app {
+  font-size: 10.5px;
+  font-weight: 600;
+  color: var(--mute);
+  border: 1px solid var(--faint);
+  border-radius: 4px;
+  padding: 0 4px;
+  margin-right: 6px;
 }
 
 /* why an item is what it is */

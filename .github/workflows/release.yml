@@ -1,6 +1,7 @@
-# A tag "v…" builds Pulse for Apple silicon and Intel in one app and puts it,
-# as a disk image and as a packed app, on a draft release of that tag. The app
-# is signed ad hoc only, not with a developer certificate (see the README).
+# A tag "v…" builds Pulse for Apple silicon and Intel in one app, as a disk
+# image and as a packed app, and for Windows, as an installer, and puts them on
+# a draft release of that tag. Neither is signed with a developer certificate
+# (see the README).
 # Started by hand, it builds a tag that is already there.
 name: Release
 
@@ -16,8 +17,34 @@ on:
 permissions:
   contents: write
 
+# a tag push and a run by hand for the same tag wait for each other
+concurrency:
+  group: release-${{ inputs.tag || github.ref_name }}
+  cancel-in-progress: false
+
 jobs:
+  # the tag's release, found (a draft or not) or made as a draft before either
+  # build, so the two builds upload to one release instead of each making one
+  release:
+    runs-on: ubuntu-latest
+    outputs:
+      id: ${{ steps.release.outputs.id }}
+    steps:
+      - id: release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ inputs.tag || github.ref_name }}
+        run: |
+          ids=$(gh api --paginate "repos/$GITHUB_REPOSITORY/releases?per_page=100" --jq ".[] | select(.tag_name == \"$TAG\") | .id")
+          id=${ids%%$'\n'*}
+          if [ -z "$id" ]; then
+            id=$(gh api -X POST "repos/$GITHUB_REPOSITORY/releases" -f tag_name="$TAG" -f name="Pulse $TAG" \
+              -f body="See the README for how to install the plugin and open the unsigned app." -F draft=true --jq .id)
+          fi
+          echo "id=$id" >> "$GITHUB_OUTPUT"
+
   macos:
+    needs: release
     runs-on: macos-latest
     steps:
       - uses: actions/checkout@v4
@@ -39,7 +66,28 @@ jobs:
         with:
           projectPath: desktop
           args: --target universal-apple-darwin --bundles app,dmg
+          releaseId: ${{ needs.release.outputs.id }}
           tagName: ${{ inputs.tag || github.ref_name }}
-          releaseName: Pulse ${{ inputs.tag || github.ref_name }}
-          releaseBody: See the README for how to install the plugin and open the unsigned app.
-          releaseDraft: true
+
+  # the same tag for Windows: an installer (NSIS) on the same release
+  windows:
+    needs: release
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.tag || github.ref }}
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Packages
+        working-directory: desktop
+        run: npm run setup
+      - uses: tauri-apps/tauri-action@v0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          projectPath: desktop
+          args: --bundles nsis
+          releaseId: ${{ needs.release.outputs.id }}
+          tagName: ${{ inputs.tag || github.ref_name }}

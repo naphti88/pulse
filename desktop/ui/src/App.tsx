@@ -2,7 +2,7 @@ import { useEffect, useLayoutEffect, useRef, useState } from 'react'
 import type { ReactNode } from 'react'
 import { listen } from '@tauri-apps/api/event'
 
-import { closePanel, panelSize, resetPlace, setCompact, setPinned, usePlaced, useSnapshot } from './api'
+import { closePanel, panelSize, resetPlace, setCompact, setPinned, useFailure, usePlaced, useSnapshot } from './api'
 import { agoShort, clock } from './format'
 import { Glyph, StateMark } from './glyphs'
 import { RunCard, useNow } from './parts'
@@ -74,6 +74,8 @@ export function App() {
   const [pinned, setPinnedState] = useState(false)
   const [isSettings, setIsSettings] = useState(false)
   const placed = usePlaced()
+  // why a chat just did not open, in the foot for a while
+  const failure = useFailure()
   // small: only the counts, as a bar that stays open
   const [size, setSize] = useStored<'big' | 'small'>('size', 'big')
   const small = size === 'small'
@@ -165,7 +167,7 @@ export function App() {
               <Glyph name="gear" size={15} />
             </button>
             {placed && (
-              <button className="tb" title="Back below the menu bar icon" onClick={() => void resetPlace()}>
+              <button className="tb" title="Back to its place by the icon" onClick={() => void resetPlace()}>
                 <Glyph name="recenter" size={15} />
               </button>
             )}
@@ -200,7 +202,13 @@ export function App() {
           <span className="logo light" title="Pulse" dangerouslySetInnerHTML={{ __html: LOGO_LIGHT }} />
           {snap && <span title={`Updated at ${clock(snap.now)}`}>Updated {agoShort(snap.now, now)}</span>}
         </span>
-        {snap && snap.problems.length > 0 && <span className="problem" title={snap.problems.join('\n')}>⚠ {snap.problems[0]}</span>}
+        {failure ? (
+          <span className="problem" title={failure}>
+            ⚠ {failure}
+          </span>
+        ) : (
+          snap && snap.problems.length > 0 && <span className="problem" title={snap.problems.join('\n')}>⚠ {snap.problems[0]}</span>
+        )}
         {snap && c && c.follow > 0 && tab !== 'open' && <span>{c.follow} later</span>}
       </div>
     </div>

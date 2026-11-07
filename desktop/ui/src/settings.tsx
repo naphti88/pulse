@@ -27,6 +27,10 @@ const APPEARANCES: [Appearance, string][] = [
 
 const MAX_HOURS = 720
 
+// on Windows (main.tsx marks the page) the counts can sit on the taskbar, by
+// the tray (taskbar.rs)
+const onWindows = () => document.documentElement.classList.contains('win')
+
 const hhmm = (minutes: number) => `${String(Math.floor(minutes / 60)).padStart(2, '0')}:${String(minutes % 60).padStart(2, '0')}`
 
 // The notifications on the Mac: per state at once and while it lies, the
@@ -96,7 +100,23 @@ export function SettingsView({ onDone }: { onDone: () => void }) {
         </div>
       </div>
 
-      <span className="st-label st-section">Notifications on the Mac</span>
+      {onWindows() && (
+        <div className="st-row">
+          <span className="st-label">Taskbar</span>
+          <span className="st-checks">
+            <label className="st-check">
+              <input type="checkbox" checked={settings.taskbar} onChange={e => save({ ...settings, taskbar: e.target.checked })} />
+              Show the counts
+            </label>
+            <label className="st-check">
+              <input type="checkbox" checked={settings.taskbarRunning} disabled={!settings.taskbar} onChange={e => save({ ...settings, taskbarRunning: e.target.checked })} />
+              with what is running now
+            </label>
+          </span>
+        </div>
+      )}
+
+      <span className="st-label st-section">Notifications</span>
 
       <table className="st-rules">
         <thead>
@@ -207,7 +227,7 @@ export function SettingsView({ onDone }: { onDone: () => void }) {
           on Mondays with the parked topics
         </label>
       </div>
-      <p className="st-note">Quiet hours are left to macOS Focus. The menu bar symbol and the panel always show everything; parked topics count nowhere.</p>
+      <p className="st-note">Quiet hours are left to the system's Focus or Do not disturb. The icon and the panel always show everything; parked topics count nowhere.</p>
     </div>
   )
 }

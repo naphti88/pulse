@@ -1,7 +1,8 @@
 // The menu bar item: one coloured symbol per open state with its count
 // (blocked, question, result) and for the commands worth a look (an
 // hourglass), a grey check when nothing needs the person;
-// what runs does not show here, only in the panel. The image is drawn only
+// what runs does not show here, only in the panel and, if asked, on the
+// Windows taskbar (taskbar.rs). The image is drawn only
 // when one of these counts changes: each new image
 // makes AppKit lay the item out anew, which an animation would do several
 // times a second.
@@ -19,7 +20,7 @@ use crate::items::Counts;
 use crate::panel;
 
 const ID: &str = "main";
-const HEIGHT: usize = 36;
+pub const HEIGHT: usize = 36;
 
 struct Mask {
     w: usize,
@@ -43,6 +44,7 @@ struct Masks {
     review: Mask,
     commands: Mask,
     done: Mask,
+    running: Mask,
     digits: Vec<Mask>,
 }
 
@@ -52,6 +54,7 @@ static MASKS: LazyLock<Masks> = LazyLock::new(|| Masks {
     review: decode(include_bytes!("../icons/tray/review.png")),
     commands: decode(include_bytes!("../icons/tray/commands.png")),
     done: decode(include_bytes!("../icons/tray/done.png")),
+    running: decode(include_bytes!("../icons/tray/running.png")),
     digits: [
         &include_bytes!("../icons/tray/digit0.png")[..],
         include_bytes!("../icons/tray/digit1.png"),
@@ -73,6 +76,9 @@ const RED: [u8; 3] = [0xff, 0x4d, 0x55];
 const AMBER: [u8; 3] = [0xf5, 0xa5, 0x24];
 const VIOLET: [u8; 3] = [0xa4, 0x6b, 0xf0];
 const TEAL: [u8; 3] = [0x1f, 0xb8, 0xa5];
+// what runs, on the taskbar only: between the panel's light and dark blue, as
+// the colours above sit between theirs
+const BLUE: [u8; 3] = [0x4d, 0x8b, 0xfc];
 
 struct Canvas {
     w: usize,
@@ -102,16 +108,19 @@ impl Canvas {
 }
 
 // a symbol and its count side by side
-struct Chip {
+pub struct Chip {
     mask: &'static Mask,
     color: [u8; 3],
     count: Option<usize>,
 }
 
-fn chips(counts: &Counts) -> Vec<Chip> {
+// a chip per open state, the most urgent first, and with `running` (the
+// taskbar's strip, if asked: taskbar.rs) what runs last
+pub fn chips(counts: &Counts, running: bool) -> Vec<Chip> {
     let m = &*MASKS;
     let mut list = Vec::new();
-    for (n, mask, color) in [(counts.blocked, &m.blocked, RED), (counts.waiting, &m.waiting, AMBER), (counts.review, &m.review, VIOLET), (counts.commands, &m.commands, TEAL)] {
+    let runs = if running { counts.running } else { 0 };
+    for (n, mask, color) in [(counts.blocked, &m.blocked, RED), (counts.waiting, &m.waiting, AMBER), (counts.review, &m.review, VIOLET), (counts.commands, &m.commands, TEAL), (runs, &m.running, BLUE)] {
         if n > 0 {
             list.push(Chip { mask, color, count: Some(n) });
         }
@@ -122,15 +131,22 @@ fn chips(counts: &Counts) -> Vec<Chip> {
 const GAP_DIGIT: usize = 3;
 const GAP_CHIP: usize = 14;
 
-fn render(chips: &[Chip]) -> Image<'static> {
-    let m = &*MASKS;
-    let digits = |n: usize| n.to_string().bytes().map(|b| &m.digits[(b - b'0') as usize]).collect::<Vec<_>>();
-    let width: usize = chips
-        .iter()
-        .map(|c| c.mask.w + c.count.map_or(0, |n| GAP_DIGIT + digits(n).iter().map(|d| d.w + 1).sum::<usize>()))
-        .sum::<usize>()
-        + GAP_CHIP * chips.len().saturating_sub(1);
-    let mut canvas = Canvas::new(width.max(1));
+fn digits(n: usize) -> Vec<&'static Mask> {
+    n.to_string().bytes().map(|b| &MASKS.digits[(b - b'0') as usize]).collect()
+}
+
+// how wide the chips are side by side (strip), at least 1
+pub fn width(chips: &[Chip]) -> usize {
+    let wide: usize = chips.iter().map(|c| c.mask.w + c.count.map_or(0, |n| GAP_DIGIT + digits(n).iter().map(|d| d.w + 1).sum::<usize>())).sum();
+    (wide + GAP_CHIP * chips.len().saturating_sub(1)).max(1)
+}
+
+// the chips side by side, HEIGHT high, as straight RGBA and its width; the
+// digits in each chip's colour, or all in `ink` (the Windows taskbar's text
+// colour, taskbar.rs)
+pub fn strip(chips: &[Chip], ink: Option<[u8; 3]>) -> (Vec<u8>, usize) {
+    let width = width(chips);
+    let mut canvas = Canvas::new(width);
     let mut x = 0;
     for chip in chips {
         canvas.draw(chip.mask, x, (HEIGHT - chip.mask.h) / 2, chip.color);
@@ -138,20 +154,70 @@ fn render(chips: &[Chip]) -> Image<'static> {
         if let Some(n) = chip.count {
             x += GAP_DIGIT;
             for d in digits(n) {
-                canvas.draw(d, x, 0, chip.color);
+                canvas.draw(d, x, 0, ink.unwrap_or(chip.color));
                 x += d.w + 1;
             }
         }
         x += GAP_CHIP;
     }
-    Image::new_owned(canvas.rgba, width.max(1) as u32, HEIGHT as u32)
+    (canvas.rgba, width)
 }
 
-// all calm: a check in the menu bar's own colour (a template image)
+#[cfg(not(windows))]
+fn render(chips: &[Chip]) -> Image<'static> {
+    let (rgba, width) = strip(chips, None);
+    Image::new_owned(rgba, width as u32, HEIGHT as u32)
+}
+
+// all calm: a check in the menu bar's own colour (a template image); the
+// Windows tray takes no template, a grey reads on a light and a dark taskbar
 fn calm() -> Image<'static> {
-    let mut canvas = Canvas::new(MASKS.done.w);
-    canvas.draw(&MASKS.done, 0, (HEIGHT - MASKS.done.h) / 2, [0, 0, 0]);
-    Image::new_owned(canvas.rgba, MASKS.done.w as u32, HEIGHT as u32)
+    let mut canvas = Canvas::new(if cfg!(windows) { HEIGHT } else { MASKS.done.w });
+    let x = if cfg!(windows) { (HEIGHT - MASKS.done.w) / 2 } else { 0 };
+    canvas.draw(&MASKS.done, x, (HEIGHT - MASKS.done.h) / 2, if cfg!(windows) { [0x9a, 0x9a, 0x9a] } else { [0, 0, 0] });
+    let width = canvas.w as u32;
+    Image::new_owned(canvas.rgba, width, HEIGHT as u32)
+}
+
+// the Windows tray shows a square: the most urgent symbol, and on it a badge
+// with the count of everything open; the tooltip names each count (tooltip),
+// and the strip itself sits on the taskbar (taskbar.rs)
+#[cfg(windows)]
+fn render_square(chips: &[Chip]) -> Image<'static> {
+    let m = &*MASKS;
+    let mut canvas = Canvas::new(HEIGHT);
+    let first = &chips[0];
+    canvas.draw(first.mask, 0, 0, first.color);
+    let total: usize = chips.iter().filter_map(|c| c.count).sum();
+    // the digits at half size: the strongest of each two by two
+    let half = |d: &Mask| {
+        let (w, h) = (d.w.div_ceil(2), d.h.div_ceil(2));
+        let at = |x: usize, y: usize| if x < d.w && y < d.h { d.alpha[y * d.w + x] } else { 0 };
+        let alpha = (0..h)
+            .flat_map(|y| (0..w).map(move |x| (x, y)))
+            .map(|(x, y)| at(2 * x, 2 * y).max(at(2 * x + 1, 2 * y)).max(at(2 * x, 2 * y + 1)).max(at(2 * x + 1, 2 * y + 1)))
+            .collect();
+        Mask { w, h, alpha }
+    };
+    let digits: Vec<Mask> = total.min(99).to_string().bytes().map(|b| half(&m.digits[(b - b'0') as usize])).collect();
+    let text_w = digits.iter().map(|d| d.w + 1).sum::<usize>().saturating_sub(1);
+    let (badge_w, badge_h) = ((text_w + 6).max(HEIGHT / 2), HEIGHT / 2 + 2);
+    let (bx, by) = (HEIGHT - badge_w, HEIGHT - badge_h);
+    // a clear ring cut from the symbol around the badge: of one colour, the two
+    // would run together at the tray's size
+    for py in by.saturating_sub(3)..HEIGHT {
+        for px in bx.saturating_sub(3)..HEIGHT {
+            let i = (py * HEIGHT + px) * 4;
+            canvas.rgba[i..i + 4].fill(0);
+        }
+    }
+    canvas.draw(&Mask { w: badge_w, h: badge_h, alpha: vec![255; badge_w * badge_h] }, bx, by, first.color);
+    let mut x = bx + (badge_w - text_w) / 2;
+    for d in &digits {
+        canvas.draw(d, x, by + (badge_h - d.h) / 2, [0xff, 0xff, 0xff]);
+        x += d.w + 1;
+    }
+    Image::new_owned(canvas.rgba, HEIGHT as u32, HEIGHT as u32)
 }
 
 static COUNTS: LazyLock<Mutex<Option<Counts>>> = LazyLock::new(Default::default);
@@ -162,9 +228,13 @@ static IS_TEMPLATE: AtomicBool = AtomicBool::new(true);
 
 fn draw(app: &AppHandle, counts: &Counts) {
     let Some(tray) = app.tray_by_id(ID) else { return };
-    let list = chips(counts);
+    let list = chips(counts, false);
     let is_template = list.is_empty();
-    let mut result = tray.set_icon(Some(if is_template { calm() } else { render(&list) }));
+    #[cfg(windows)]
+    let image = if is_template { calm() } else { render_square(&list) };
+    #[cfg(not(windows))]
+    let image = if is_template { calm() } else { render(&list) };
+    let mut result = tray.set_icon(Some(image));
     if IS_TEMPLATE.swap(is_template, Ordering::SeqCst) != is_template {
         result = result.and_then(|_| tray.set_icon_as_template(is_template));
     }
@@ -186,15 +256,30 @@ pub fn show(app: &AppHandle, counts: &Counts) {
     if SHOWN.lock().expect("tray shown").replace(shown) != Some(shown) {
         draw(app, counts);
     }
-    let tip = match counts.blocked + counts.waiting + counts.review + counts.commands {
-        0 if counts.running > 0 => format!("Pulse: {} running", counts.running),
-        0 => "Pulse: all quiet".to_string(),
-        1 => "Pulse: 1 item needs you".to_string(),
-        n => format!("Pulse: {n} items need you"),
-    };
+    let tip = tooltip(counts, false);
+    #[cfg(windows)]
+    crate::taskbar::show(counts);
     if let Some(tray) = app.tray_by_id(ID) {
         let _ = tray.set_tooltip(Some(tip));
     }
+}
+
+// each count that needs the person, as the panel names it and in the image's
+// order ("Pulse: 1 blocked, 2 questions"), else how many run; with `running`
+// how many run among them, as the taskbar's strip shows it (taskbar.rs);
+// within the 127 characters a Windows tooltip holds
+pub fn tooltip(counts: &Counts, running: bool) -> String {
+    let runs = if running { counts.running } else { 0 };
+    let named = [(counts.blocked, "blocked", "blocked"), (counts.waiting, "question", "questions"), (counts.review, "to review", "to review"), (counts.commands, "command", "commands"), (runs, "running", "running")];
+    let each: Vec<String> = named.iter().filter(|(n, ..)| *n > 0).map(|&(n, one, many)| format!("{n} {}", if n == 1 { one } else { many })).collect();
+    let mut tip = match each.len() {
+        0 if counts.running > 0 => format!("Pulse: {} running", counts.running),
+        0 => "Pulse: all quiet".to_string(),
+        _ => format!("Pulse: {}", each.join(", ")),
+    };
+    // all ASCII: a byte is a character
+    tip.truncate(127);
+    tip
 }
 
 fn autostart_enabled(app: &AppHandle) -> bool {
@@ -245,4 +330,38 @@ pub fn build(app: &AppHandle) -> tauri::Result<()> {
         })
         .build(app)?;
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn the_tooltip_names_each_count() {
+        let all = Counts { blocked: 1, waiting: 2, review: 1, commands: 1, running: 3, ..Counts::default() };
+        assert_eq!(tooltip(&all, false), "Pulse: 1 blocked, 2 questions, 1 to review, 1 command");
+        assert_eq!(tooltip(&Counts { waiting: 1, commands: 4, ..Counts::default() }, false), "Pulse: 1 question, 4 commands");
+        assert_eq!(tooltip(&Counts { running: 2, follow: 5, parked: 1, ..Counts::default() }, false), "Pulse: 2 running");
+        assert_eq!(tooltip(&Counts::default(), false), "Pulse: all quiet");
+        // the taskbar's strip with what runs: named among the rest
+        assert_eq!(tooltip(&all, true), "Pulse: 1 blocked, 2 questions, 1 to review, 1 command, 3 running");
+        assert_eq!(tooltip(&Counts { running: 1, follow: 5, ..Counts::default() }, true), "Pulse: 1 running");
+        assert_eq!(tooltip(&Counts::default(), true), "Pulse: all quiet");
+        // the 127 characters of a Windows tooltip, however large the counts
+        let large = Counts { blocked: 99_999, waiting: 99_999, review: 99_999, commands: 99_999, ..Counts::default() };
+        assert_eq!(tooltip(&large, false), "Pulse: 99999 blocked, 99999 questions, 99999 to review, 99999 commands");
+        let huge = Counts { blocked: usize::MAX, waiting: usize::MAX, review: usize::MAX, commands: usize::MAX, running: usize::MAX, ..Counts::default() };
+        assert_eq!(tooltip(&huge, true).encode_utf16().count(), 127);
+    }
+
+    #[test]
+    fn what_runs_is_a_chip_only_when_asked_and_then_last() {
+        let counts = Counts { blocked: 1, running: 3, ..Counts::default() };
+        let shown = |running| chips(&counts, running).iter().map(|c| (c.color, c.count)).collect::<Vec<_>>();
+        assert_eq!(shown(false), [(RED, Some(1))]);
+        assert_eq!(shown(true), [(RED, Some(1)), (BLUE, Some(3))]);
+        // alone it still makes a strip; nothing running, no chip
+        assert_eq!(chips(&Counts { running: 2, ..Counts::default() }, true).len(), 1);
+        assert!(chips(&Counts { follow: 2, parked: 1, ..Counts::default() }, true).is_empty());
+    }
 }

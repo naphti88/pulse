@@ -3,7 +3,7 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import { getHistory, mark, openChat } from './api'
 import { clock, dayName, dayOf } from './format'
 import { Disc, Glyph, markOf, typeOf } from './glyphs'
-import { Card, Where } from './parts'
+import { appOf, Card, Where } from './parts'
 import type { Entry } from './types'
 
 type Filter = 'chat' | 'routine' | 'all'
@@ -103,9 +103,9 @@ export function HistoryTab({ version, now }: { version: number; now: number }) {
       {days.map(([day, lines]) => (
         <Card key={day} id={`hist-${day}`} fixed title={dayName(lines[0]!.entry.at, now)} count={lines.length}>
           {lines.map(({ entry: e, count }) => (
-            <div key={e.id} className={`row ${e.archived ? 'dim' : ''}`} title={`${e.title}\n${e.said}\nOpen in Claude`} onClick={() => void openChat(e.id)}>
+            <div key={e.id} className={`row ${e.archived ? 'dim' : ''}`} title={`${e.title}\n${e.said}\nOpen in ${appOf(e.id)}`} onClick={() => void openChat(e.id)}>
               <Disc mark={markOf(e)} type={typeOf(e)} />
-              <b className="title">
+              <b className="title" dir="auto">
                 {e.title}
                 {count > 1 ? ` ×${count}` : ''}
               </b>
@@ -126,10 +126,10 @@ export function HistoryTab({ version, now }: { version: number; now: number }) {
                   </span>
                 )}
               </span>
-              <Where project={e.project} from={parents.get(e.parentId ?? '')}>
+              <Where project={e.project} from={parents.get(e.parentId ?? '')} id={e.id}>
                 {(e.stage === 'parked' || e.archived || e.stage === 'running') && <span className="from">{e.stage === 'parked' ? 'parked' : e.stage === 'running' ? 'running' : 'archived'}</span>}
               </Where>
-              {e.said && <p>{e.said}</p>}
+              {e.said && <p dir="auto">{e.said}</p>}
             </div>
           ))}
         </Card>

@@ -72,10 +72,13 @@ export type RunRecord = {
 
 const TRIGGER = /^\s*<scheduled-task name="([^"]+)"(?: file="([^"]+)")?/
 // the plain line as asked for, or as a markdown reference ("[//]: # (...)")
-// or an HTML comment, as asked for for a while
+// or an HTML comment, as asked for for a while: each form with its own end,
+// so a plain line keeps a final ")", and a line with nothing after the word
+// takes nothing from the next line
 const STATUS_LINE =
-  /^[ \t>*_`]*(?:<!--\s*|\[\/\/\]:\s*#\s*\(\s*)?STATUS:\s*(idle|worked|waiting|blocked|parked)\b\s*[|:–-]?\s*(.*?)\s*(?:-->|\))?[\s*_`]*$/gim
-const PING_LINE = /^[ \t>*_`]*(?:<!--\s*|\[\/\/\]:\s*#\s*\(\s*)?PING:\s*(.+?)\s*(?:-->|\))?[\s*_`]*$/gim
+  /^[ \t>*_`]*(?:<!--\s*STATUS:\s*(idle|worked|waiting|blocked|parked)\b[^\S\r\n]*(?:[|:–]|-(?!->))?[^\S\r\n]*(.*?)\s*(?:-->)?|\[\/\/\]:\s*#\s*\(\s*STATUS:\s*(idle|worked|waiting|blocked|parked)\b[^\S\r\n]*[|:–-]?[^\S\r\n]*(.*?)\s*\)?|STATUS:\s*(idle|worked|waiting|blocked|parked)\b[^\S\r\n]*[|:–-]?[^\S\r\n]*(.*?))[\s*_`]*$/gim
+const PING_LINE =
+  /^[ \t>*_`]*(?:<!--\s*PING:[^\S\r\n]*(\S.*?)\s*(?:-->)?|\[\/\/\]:\s*#\s*\(\s*PING:[^\S\r\n]*(\S.*?)\s*\)?|PING:[^\S\r\n]*(\S.*?))[\s*_`]*$/gim
 const PING_TOOL = /^PushNotification$|^mcp__.+__(send|post|notify|reply|chat_post)/i
 const WEBHOOK = /discord(?:app)?\.com\/api\/webhooks|hooks\.slack\.com/i
 const UNANSWERED_TEXT = /went unanswered/i
@@ -85,6 +88,10 @@ const DENIED_TEXT = /doesn't want to proceed|permission.{0,40}denied|was denied|
 const TAIL = 600
 const MAX_TURNS = 200
 const MAX_PER_TURN = 50
+
+// texts are cut by characters, as backfill_runs.py cuts them: a cut by UTF-16
+// units can split an emoji, and Pulse can't read a record with half of one
+const cut = (text: string, from: number, to?: number) => Array.from(text).slice(from, to).join('')
 
 // Every session ends its answers with a STATUS line, which Pulse reads
 // from the transcript (a chat) or from the record (a routine run). worked is a
@@ -130,8 +137,27 @@ type State = {
   pendingTrigger?: Trigger
 }
 
+// Claude Code (os.homedir) and Pulse use USERPROFILE on Windows even when
+// HOME is set (Git Bash, MSYS); OS=Windows_NT is set on every Windows box.
+// Elsewhere HOME comes first. With neither, nothing is recorded: the path
+// would be relative and leave an undefined folder in the session's project.
+async function homeOf($: $): Promise<string | undefined> {
+  const win = (await $.env.get('OS')) === 'Windows_NT'
+  const profile = await $.env.get('USERPROFILE')
+  const posix = await $.env.get('HOME')
+  return (win ? profile || posix : posix || profile) || undefined
+}
+
+// a file of the recorder's own; without a home folder there is none to write
+async function recorderFile($: $, folder: string): Promise<string> {
+  const home = await homeOf($)
+  if (!home) throw new Error('no home folder')
+  return `${home}/.claude/routine-recorder/${folder}/${await $.session.id()}.json`
+}
+
 async function load($: $, s: State): Promise<RunRecord | null> {
-  const home = await $.env.get('HOME')
+  const home = await homeOf($)
+  if (!home) return null
   const id = await $.session.id()
   s.file = `${home}/.claude/routine-recorder/runs/${id}.json`
   if (!(await $.fs.exists(s.file))) return null
@@ -148,7 +174,8 @@ async function ensure($: $, s: State): Promise<RunRecord | null> {
 }
 
 async function save($: $, s: State): Promise<void> {
-  if (s.rec === null) return
+  // no file to write without a home folder, or when load failed before naming it
+  if (s.rec === null || s.file === '') return
   s.rec.updatedAt = await $.clock.now()
   const text = JSON.stringify(s.rec, null, 1)
   s.saving = s.saving.then(() => $.fs.write(s.file, text)).catch(() => undefined)
@@ -156,7 +183,7 @@ async function save($: $, s: State): Promise<void> {
 }
 
 async function pendingFile($: $): Promise<string> {
-  return `${await $.env.get('HOME')}/.claude/routine-recorder/pending/${await $.session.id()}.json`
+  return recorderFile($, 'pending')
 }
 
 async function writePending($: $, s: State): Promise<void> {
@@ -184,7 +211,7 @@ async function endCall($: $, s: State, tool: string): Promise<void> {
 }
 
 async function failedFile($: $): Promise<string> {
-  return `${await $.env.get('HOME')}/.claude/routine-recorder/failed/${await $.session.id()}.json`
+  return recorderFile($, 'failed')
 }
 
 async function clearFailed($: $): Promise<void> {
@@ -385,9 +412,12 @@ export const register: Register = on => {
 
     try {
       turn.tools[e.tool] = (turn.tools[e.tool] ?? 0) + 1
-      const command = e.tool === 'Bash' ? e.command : undefined
-      if (PING_TOOL.test(e.tool) || (command !== undefined && WEBHOOK.test(command))) {
-        turn.pings.push({ via: e.tool, detail: JSON.stringify(e).slice(0, 200), at: await $.clock.now() })
+      // a webhook posted from a shell: Bash, or PowerShell on Windows
+      const command = e.tool === 'Bash' || e.tool === 'PowerShell' ? e.command : undefined
+      // a file sent to reach the person's phone pings them, as PushNotification does
+      const proactive = e.tool === 'SendUserFile' && e.status === 'proactive'
+      if (PING_TOOL.test(e.tool) || proactive || (command !== undefined && WEBHOOK.test(command))) {
+        turn.pings.push({ via: e.tool, detail: cut(JSON.stringify(e), 0, 200), at: await $.clock.now() })
         turn.pings = turn.pings.slice(-MAX_PER_TURN)
       }
     } catch {
@@ -404,7 +434,7 @@ export const register: Register = on => {
       const isDenied = ran.deny !== undefined || (ran.isError === true && DENIED_TEXT.test(text))
       if (ran.isError === true || ran.deny !== undefined) {
         turn.toolErrors++
-        turn.lastError = `${e.tool}: ${text.slice(0, 200)}`
+        turn.lastError = `${e.tool}: ${cut(text, 0, 200)}`
       }
       if (asked !== undefined) {
         asked.outcome = UNANSWERED_TEXT.test(text)
@@ -414,7 +444,7 @@ export const register: Register = on => {
             : ran.isError === true
               ? 'error'
               : 'allowed'
-        if (text !== '') asked.outcomeText = text.slice(0, 200)
+        if (text !== '') asked.outcomeText = cut(text, 0, 200)
       } else if (isDenied || UNANSWERED_TEXT.test(text)) {
         turn.permissions.push({
           tool: e.tool,
@@ -422,7 +452,7 @@ export const register: Register = on => {
           decision: isDenied ? 'deny' : 'ask',
           at: await $.clock.now(),
           outcome: isDenied ? 'denied' : 'unanswered',
-          outcomeText: text.slice(0, 200),
+          outcomeText: cut(text, 0, 200),
         })
       }
       await save($, s)
@@ -443,14 +473,16 @@ export const register: Register = on => {
         const endedAt = await $.clock.now()
         turn.endedAt = endedAt
         turn.end = e.reason
-        turn.answerTail = done.text.trim().slice(-TAIL) || undefined
+        turn.answerTail = cut(done.text.trim(), -TAIL) || undefined
         const last = [...done.text.matchAll(STATUS_LINE)].at(-1)
         if (last !== undefined) {
-          turn.status = last[1]?.toLowerCase() as RunStatus
-          turn.statusText = last[2]?.trim() || undefined
+          // the groups of the form that matched
+          turn.status = (last[1] ?? last[3] ?? last[5])?.toLowerCase() as RunStatus
+          turn.statusText = (last[2] ?? last[4] ?? last[6])?.trim() || undefined
         }
         for (const ping of done.text.matchAll(PING_LINE)) {
-          turn.pings.push({ via: 'PING line', detail: (ping[1] ?? '').slice(0, 200), at: endedAt })
+          const detail = ping[1] ?? ping[2] ?? ping[3] ?? ''
+          turn.pings.push({ via: 'PING line', detail: cut(detail, 0, 200), at: endedAt })
         }
         if (rec.activeTurnId === e.turnId) rec.activeTurnId = null
         await save($, s)

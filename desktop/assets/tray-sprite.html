@@ -11,7 +11,7 @@
 </style></head>
 <body>
 <script>
-const names = ['blocked', 'waiting', 'review', 'commands', 'done']
+const names = ['blocked', 'waiting', 'review', 'commands', 'done', 'running']
 document.body.innerHTML = names.map((n, i) => `<div class="c" style="left:${i * 40}px;top:0">${G[n].replace(' class="spin"', '')}</div>`).join('') +
   [...'0123456789'].map((d, i) => `<div class="c d" style="left:${i * 40}px;top:40px">${d}</div>`).join('')
 </script>
