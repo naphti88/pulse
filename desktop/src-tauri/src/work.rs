@@ -27,9 +27,38 @@ use crate::util::{mtime_ms, parse_time, read_tail};
 
 const EDITS: [&str; 4] = ["Edit", "Write", "MultiEdit", "NotebookEdit"];
 
+#[cfg(not(windows))]
+const GIT: &str = "/usr/bin/git";
+// on Windows git from PATH, and without a console window of its own
+#[cfg(windows)]
+const GIT: &str = "git";
+
 fn git(dir: &str, args: &[&str]) -> Option<String> {
-    let out = Command::new("/usr/bin/git").args(["--no-optional-locks", "-C", dir]).args(args).output().ok()?;
+    let mut command = Command::new(GIT);
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+        command.creation_flags(CREATE_NO_WINDOW);
+    }
+    let out = command.args(["--no-optional-locks", "-C", dir]).args(args).output().ok()?;
     out.status.success().then(|| String::from_utf8_lossy(&out.stdout).into_owned())
+}
+
+// a path as git writes it: on Windows with / and the drive in capitals, so
+// that what a session edited (with backslashes) and what git lists (c:/a/b) compare
+#[cfg(windows)]
+fn norm(path: &str) -> String {
+    let path = path.strip_prefix(r"\\?\").unwrap_or(path).replace('\\', "/");
+    match path.as_bytes() {
+        [drive, b':', ..] => format!("{}{}", (*drive as char).to_ascii_uppercase(), &path[1..]),
+        _ => path,
+    }
+}
+
+#[cfg(not(windows))]
+fn norm(path: &str) -> String {
+    path.to_string()
 }
 
 // the paths of `git status --porcelain -z`; a rename is followed by its old name
@@ -58,7 +87,7 @@ struct Repo {
 static REPOS: LazyLock<Mutex<HashMap<String, (f64, Option<Repo>)>>> = LazyLock::new(Default::default);
 
 fn read_repo(dir: &str) -> Option<Repo> {
-    let root = git(dir, &["rev-parse", "--show-toplevel"])?.trim().to_string();
+    let root = norm(git(dir, &["rev-parse", "--show-toplevel"])?.trim());
     // file by file: by default a new folder is one entry, which is no file of anyone
     let status = git(dir, &["status", "--porcelain", "-z", "--untracked-files=all"])?;
     let dirty = parse_status(&status).into_iter().map(|p| format!("{root}/{p}")).collect();
@@ -175,7 +204,7 @@ fn read_line(line: &str, seen: &mut Seen) {
         match block.get("type").and_then(Value::as_str) {
             Some("tool_use") if EDITS.contains(&name) => {
                 if let Some(file) = block.get("input").and_then(|i| i.get("file_path")).and_then(Value::as_str) {
-                    seen.files.insert(file.to_string());
+                    seen.files.insert(norm(file));
                 }
             }
             Some("tool_use") if SHELL.contains(&name) => {
@@ -236,15 +265,15 @@ fn holds(root: &str, dir: &str) -> bool {
 // the repositories a session worked in: its own folder, where its shell went and
 // where the files it edited lie. A folder of one already found costs no call to git.
 fn repos(s: &Session, seen: &Seen, now: f64) -> Vec<Repo> {
-    let mut edited: Vec<&str> = seen.files.iter().filter_map(|f| Path::new(f).parent()?.to_str()).collect();
+    let mut edited: Vec<&str> = seen.files.iter().filter_map(|f| f.rsplit_once('/').map(|(dir, _)| dir)).collect();
     edited.sort_unstable();
     edited.dedup();
     let mut found: Vec<Repo> = Vec::new();
-    for dir in s.cwd.iter().chain(&s.folders).map(String::as_str).chain(edited) {
-        if found.iter().any(|repo| holds(&repo.root, dir)) || !Path::new(dir).is_dir() {
+    for dir in s.cwd.iter().chain(&s.folders).map(|d| norm(d)).chain(edited.into_iter().map(str::to_string)) {
+        if found.iter().any(|repo| holds(&repo.root, &dir)) || !Path::new(&dir).is_dir() {
             continue;
         }
-        found.extend(repo_at(dir, now).filter(|repo| !found.iter().any(|r| r.root == repo.root)));
+        found.extend(repo_at(&dir, now).filter(|repo| !found.iter().any(|r| r.root == repo.root)));
     }
     found
 }
@@ -252,10 +281,10 @@ fn repos(s: &Session, seen: &Seen, now: f64) -> Vec<Repo> {
 fn notes(s: &Session, transcript: Option<&PathBuf>, with_pr: &HashSet<&str>, now: f64) -> Vec<String> {
     let mut out = Vec::new();
     let seen = transcript.map(|t| touched(t)).unwrap_or_default();
-    let home = s.cwd.as_deref();
+    let home = s.cwd.as_deref().map(norm);
     for repo in repos(s, &seen, now) {
-        let at_home = home.is_some_and(|dir| holds(&repo.root, dir));
-        let files = if at_home && home.is_some_and(is_worktree) {
+        let at_home = home.as_deref().is_some_and(|dir| holds(&repo.root, dir));
+        let files = if at_home && home.as_deref().is_some_and(is_worktree) {
             repo.dirty.len()
         } else {
             repo.dirty.iter().filter(|p| seen.files.contains(*p) || seen.changed_by_shell(p)).count()
@@ -355,7 +384,8 @@ mod tests {
             let dir = std::env::temp_dir().join(format!("pulse-work-{}-{name}", std::process::id()));
             let _ = std::fs::remove_dir_all(&dir);
             std::fs::create_dir_all(&dir).expect("dir");
-            Git(dir.canonicalize().expect("path"))
+            // without the \\?\ that canonicalize puts first on Windows: git takes no such path
+            Git(PathBuf::from(norm(&dir.canonicalize().expect("path").to_string_lossy())))
         }
 
         fn run(&self, dir: &str, args: &[&str]) {
@@ -365,7 +395,7 @@ mod tests {
         }
 
         fn path(&self, dir: &str) -> String {
-            self.0.join(dir).to_string_lossy().into_owned()
+            norm(&self.0.join(dir).to_string_lossy())
         }
     }
 

@@ -60,12 +60,16 @@ pub fn checks(input: &Inputs, items: &[Item], settings: &Settings, store: &Store
             let item = session.and_then(|s| items.iter().find(|i| i.id == s.id));
             let names = input.names.get(&c.session);
             let named = names.and_then(|n| n.get(&c.id));
-            let background = named.is_some();
+            // in the background: so named by the transcript, or left running
+            // by a call that returned
+            let background = named.is_some() || c.left;
             let what = match named {
                 Some(what) if !what.is_empty() => what.clone(),
                 Some(_) => "Command".to_string(),
-                // in the foreground: the call the session waits for
-                None => session.and_then(|s| input.live.get(&s.id)).and_then(|l| l.tool.clone()).unwrap_or_else(|| "Command in the foreground".to_string()),
+                None if c.left => "Command left running".to_string(),
+                // in the foreground: the call the session waits for, while in
+                // its turn (after it, what it waits for is the background)
+                None => session.filter(|s| input.in_turn.contains(&s.id)).and_then(|s| input.live.get(&s.id)).and_then(|l| l.tool.clone()).unwrap_or_else(|| "Command in the foreground".to_string()),
             };
             let quiet_since = input.written.get(&c.session).copied().unwrap_or(c.started);
             let is_gone = session.is_none_or(|s| s.archived);
@@ -115,7 +119,7 @@ mod tests {
     const CLI: &str = "7e3c51a2-0b4d-4c8e-9f61-2a5d8b0c4e17";
 
     fn command(id: &str, minutes: f64) -> Command {
-        Command { session: CLI.into(), id: id.into(), started: NOW - minutes * MINUTE, last_output: NOW, cpu: 0.0, hot_since: None, memory: 1, ports: vec![] }
+        Command { session: CLI.into(), id: id.into(), started: NOW - minutes * MINUTE, last_output: NOW, cpu: 0.0, hot_since: None, memory: 1, ports: vec![], left: false }
     }
 
     fn flags(input: &Inputs) -> Vec<(String, Option<Flag>)> {
@@ -159,6 +163,56 @@ mod tests {
         // quiet for over an hour: what runs in the background is forgotten
         input.written.insert(CLI.into(), NOW - 61.0 * MINUTE);
         assert_eq!(flags(&input).iter().find(|(id, _)| id == "dev").map(|f| f.1), Some(Some(Flag::Forgotten)));
+    }
+
+    // what a call left running as it returned: no one waits for it, so it is
+    // background work (running long, forgotten once its session is quiet,
+    // never stuck), told apart from the call the session runs now
+    #[test]
+    fn what_a_call_left_running_is_background_work() {
+        let mut input = Inputs::empty(NOW);
+        let mut session = Session::default();
+        session.id = "local_x".into();
+        session.cli_id = Some(CLI.into());
+        input.sessions = vec![session];
+        let mut live = crate::live::Live::default();
+        live.tool = Some("Bash · npm test".into());
+        input.live.insert("local_x".into(), live);
+        input.in_turn.insert("local_x".into());
+        input.commands = vec![Command { left: true, ..command("server", 30.0) }, Command { left: true, ..command("old", 130.0) }, command("tests", 20.0)];
+        input.written.insert(CLI.into(), NOW - 10.0 * MINUTE);
+        assert_eq!(flags(&input), vec![("old".into(), Some(Flag::Long)), ("server".into(), None), ("tests".into(), Some(Flag::Stuck))]);
+        let list = checks(&input, &[], &Settings::default(), &Store::default());
+        let what: Vec<(&str, bool)> = list.iter().map(|c| (c.what.as_str(), c.background)).collect();
+        assert_eq!(what, [("Bash · npm test", false), ("Command left running", true), ("Command left running", true)]);
+        input.written.insert(CLI.into(), NOW - 61.0 * MINUTE);
+        assert_eq!(flags(&input), vec![("old".into(), Some(Flag::Forgotten)), ("server".into(), Some(Flag::Forgotten)), ("tests".into(), Some(Flag::Stuck))]);
+        // one the transcript names keeps its name
+        input.names.insert(CLI.into(), HashMap::from([("server".into(), "pnpm dev".into())]));
+        let list = checks(&input, &[], &Settings::default(), &Store::default());
+        assert!(list.iter().any(|c| c.key.ends_with("/server") && c.what == "pnpm dev" && c.background));
+    }
+
+    // a command of a session whose turn has ended, that the transcript does
+    // not name (a subagent's, say): not labelled with what the session now
+    // waits for in the background
+    #[test]
+    fn a_command_after_the_turn_is_not_the_background_work() {
+        let mut input = Inputs::empty(NOW);
+        let mut session = Session::default();
+        session.id = "local_x".into();
+        session.cli_id = Some(CLI.into());
+        input.sessions = vec![session];
+        let mut live = crate::live::Live::default();
+        live.tool = Some("in the background · workflow (+1)".into());
+        input.live.insert("local_x".into(), live);
+        input.commands = vec![command("tests", 20.0)];
+        let what = |input: &Inputs| checks(input, &[], &Settings::default(), &Store::default())[0].what.clone();
+        assert_eq!(what(&input), "Command in the foreground");
+        // while in its turn, it is the call the session waits for
+        input.live.get_mut("local_x").expect("live").tool = Some("Bash · npm test".into());
+        input.in_turn.insert("local_x".into());
+        assert_eq!(what(&input), "Bash · npm test");
     }
 
     #[test]

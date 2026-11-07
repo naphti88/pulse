@@ -3,13 +3,13 @@
 // after how many hours, and the morning summary; and how the panel looks.
 // One JSON file beside the state; without one, Pulse tells as it always did.
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::{LazyLock, Mutex};
 
 use serde::{Deserialize, Serialize};
 
 use crate::items::State;
-use crate::util::home;
+use crate::util::support_dir;
 
 #[derive(Serialize, Deserialize, Clone, Copy, PartialEq, Eq, Debug)]
 #[serde(rename_all = "camelCase")]
@@ -138,7 +138,7 @@ impl Settings {
 pub static SETTINGS: LazyLock<Mutex<(Settings, Option<String>)>> = LazyLock::new(|| Mutex::new(load()));
 
 fn path() -> Result<PathBuf, String> {
-    Ok(home()?.join("Library/Application Support/local.claude-dashboard.pulse/settings.json"))
+    Ok(support_dir()?.join("settings.json"))
 }
 
 // no file: the defaults; a file that cannot be read: the defaults too, and
@@ -160,13 +160,20 @@ fn load() -> (Settings, Option<String>) {
 }
 
 pub fn save(settings: &Settings) -> Result<(), String> {
-    let path = path()?;
+    save_to(&path()?, settings)
+}
+
+// through a tmp file of this process's own, as the state is saved
+fn save_to(path: &Path, settings: &Settings) -> Result<(), String> {
     if let Some(dir) = path.parent() {
         std::fs::create_dir_all(dir).map_err(|e| e.to_string())?;
     }
-    let tmp = path.with_extension("json.tmp");
-    std::fs::write(&tmp, serde_json::to_vec_pretty(settings).map_err(|e| e.to_string())?).map_err(|e| e.to_string())?;
-    std::fs::rename(&tmp, &path).map_err(|e| e.to_string())
+    let tmp = path.with_extension(format!("json.{}.tmp", std::process::id()));
+    let text = serde_json::to_vec_pretty(settings).map_err(|e| e.to_string())?;
+    std::fs::write(&tmp, text).and_then(|()| std::fs::rename(&tmp, path)).map_err(|e| {
+        let _ = std::fs::remove_file(&tmp);
+        e.to_string()
+    })
 }
 
 #[cfg(test)]
@@ -194,5 +201,34 @@ mod tests {
         map.remove("appearance");
         let read: Settings = serde_json::from_value(old).expect("read");
         assert_eq!((read.commands, read.limits, read.appearance), (commands_rule(), Limits::default(), Appearance::System));
+    }
+
+    #[test]
+    fn a_save_leaves_another_pulses_save_alone_and_no_tmp_behind() {
+        let dir = std::env::temp_dir().join(format!("pulse-settings-save-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).expect("dir");
+        let path = dir.join("settings.json");
+        // another Pulse between its write and its rename: a build from before
+        // the tmp files of their own, and one after
+        let theirs = [dir.join("settings.json.tmp"), dir.join(format!("settings.json.{}.tmp", std::process::id() + 1))];
+        for tmp in &theirs {
+            std::fs::write(tmp, "{\n  \"blocked\": {").expect("theirs");
+        }
+        let settings = Settings { summary: false, ..Settings::default() };
+        save_to(&path, &settings).expect("save");
+        let read: Settings = serde_json::from_slice(&std::fs::read(&path).expect("saved")).expect("whole");
+        assert_eq!(read, settings);
+        for tmp in &theirs {
+            assert_eq!(std::fs::read_to_string(tmp).expect("theirs"), "{\n  \"blocked\": {");
+        }
+        assert_eq!(std::fs::read_dir(&dir).expect("dir").count(), 3);
+
+        // a save that cannot be moved into place takes its tmp file with it
+        std::fs::remove_file(&path).expect("saved");
+        std::fs::create_dir(&path).expect("in the way");
+        assert!(save_to(&path, &settings).is_err());
+        assert_eq!(std::fs::read_dir(&dir).expect("dir").count(), 3);
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }

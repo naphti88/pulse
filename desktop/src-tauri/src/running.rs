@@ -18,7 +18,7 @@ const TAIL_STEPS: [u64; 3] = [64 * 1024, 512 * 1024, 2 * 1024 * 1024];
 // the entries of the conversation itself; the app writes more kinds beside
 // them (cost, title, mode, a PR link, an API request …) and adds new ones, which
 // say nothing about whether a turn is open
-const CONVERSATION: [&str; 3] = ["user", "assistant", "system"];
+pub const CONVERSATION: [&str; 3] = ["user", "assistant", "system"];
 
 // every text an entry holds, joined without a separator
 fn all_text(line: &Value) -> String {
@@ -53,6 +53,10 @@ pub fn is_turn_open(lines: &[Value], now: f64, is_subagent: bool) -> bool {
             return false;
         }
     }
+    let is_recent = |line: &Value| line.get("timestamp").and_then(Value::as_str).and_then(parse_time).is_some_and(|at| now - at < TURN_STALE_MS);
+    // a compaction's summary carries on the turn it was made in, or none: what
+    // came before it tells, else its own time
+    let mut summary = None;
     for line in lines.iter().rev() {
         if !counts(line, is_subagent) {
             continue;
@@ -71,13 +75,16 @@ pub fn is_turn_open(lines: &[Value], now: f64, is_subagent: bool) -> bool {
                 return false
             }
             Some("user") if all_text(line).starts_with("[Request interrupted") => return false,
+            Some("user") if flag(line, "isCompactSummary") => {
+                summary.get_or_insert(line);
+                continue;
+            }
             _ => {}
         }
         // a prompt, a tool call or its result: the turn goes on, unless it went quiet long ago
-        let at = line.get("timestamp").and_then(Value::as_str).and_then(parse_time);
-        return at.is_some_and(|at| now - at < TURN_STALE_MS);
+        return is_recent(line);
     }
-    false
+    summary.is_some_and(is_recent)
 }
 
 struct Hit {
@@ -138,5 +145,24 @@ mod tests {
         let call = format!(r#"{{"type":"assistant","timestamp":"{at}","message":{{"stop_reason":"tool_use","content":[{{"type":"tool_use","id":"t1","name":"Bash","input":{{}}}}]}}}}"#);
         assert!(!is_turn_open(&lines(&[answer.clone(), stop.clone(), pr.clone()]), now, false));
         assert!(is_turn_open(&lines(&[answer, stop, call, pr]), now, false));
+    }
+
+    #[test]
+    fn what_came_before_a_compaction_tells_whether_a_turn_is_open() {
+        let now = now_ms();
+        let time = |ago: f64| chrono::DateTime::from_timestamp_millis((now - ago) as i64).expect("time").to_rfc3339();
+        let (answered, compacted) = (time(600_000.0), time(5_000.0));
+        let answer = format!(r#"{{"type":"assistant","timestamp":"{answered}","message":{{"stop_reason":"end_turn","content":[{{"type":"text","text":"Fertig."}}]}}}}"#);
+        let took = format!(r#"{{"type":"system","subtype":"turn_duration","timestamp":"{answered}"}}"#);
+        let boundary = format!(r#"{{"type":"system","subtype":"compact_boundary","timestamp":"{compacted}"}}"#);
+        let summary = |at: &str| format!(r#"{{"type":"user","isCompactSummary":true,"timestamp":"{at}","message":{{"role":"user","content":"This session is being continued from a previous conversation."}}}}"#);
+        // the app compacts a chat that is done
+        assert!(!is_turn_open(&lines(&[answer, took, boundary.clone(), summary(&compacted)]), now, false));
+        // a prompt compacted first, by a summary made hours before
+        let prompt = format!(r#"{{"type":"user","timestamp":"{compacted}","message":{{"role":"user","content":"Weiter"}}}}"#);
+        assert!(is_turn_open(&lines(&[prompt, boundary.clone(), summary(&time(3.0 * 3_600_000.0))]), now, false));
+        // nothing before it in the tail: its own time tells
+        assert!(is_turn_open(&lines(&[boundary.clone(), summary(&compacted)]), now, false));
+        assert!(!is_turn_open(&lines(&[boundary, summary(&time(3.0 * 3_600_000.0))]), now, false));
     }
 }

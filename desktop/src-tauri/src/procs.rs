@@ -1,31 +1,25 @@
-// The commands the sessions run right now, from the Mac's process table: every
+// The commands the sessions run right now, from the process table: every
 // command a session starts, in the foreground or the background, writes to
-// /private/tmp/claude-<uid>/<project>/<session>/tasks/<id>.output and holds
-// that file open while it runs; the processes that hold it are the command
-// (the shell and what it started). Read through libproc, without lsof: one
-// look costs a few milliseconds.
+// <temp>/claude[-<uid>]/<project>/<session>/tasks/<id>.output and holds that
+// file open while it runs; the processes that hold it are the command (the
+// shell and what it started). On macOS through libproc (procs_mac.rs), on
+// Windows through the file system, which names the processes that have a file
+// open (procs_win.rs).
 
 use std::collections::HashMap;
-use std::ffi::c_void;
-use std::sync::{LazyLock, Mutex};
+use std::sync::{LazyLock, Mutex, PoisonError};
 
+#[cfg(target_os = "macos")]
+use crate::procs_mac::scan;
+#[cfg(windows)]
+use crate::procs_win::scan;
 use crate::util::mtime_ms;
 
-// sys/proc_info.h (checked against the SDK with offsetof)
-const PROC_PIDLISTFDS: i32 = 1;
-const PROC_PIDTASKALLINFO: i32 = 2;
-const PROC_PIDFDVNODEPATHINFO: i32 = 2;
-const PROC_PIDFDSOCKETINFO: i32 = 3;
-const PROX_FDTYPE_VNODE: u32 = 1;
-const PROX_FDTYPE_SOCKET: u32 = 2;
-const VNODE_PATH_SIZE: usize = 1200;
-const VNODE_PATH_AT: usize = 176;
-const SOCKET_SIZE: usize = 792;
-const SOCKET_KIND_AT: usize = 256;
-const SOCKET_LPORT_AT: usize = 268;
-const SOCKET_TCP_STATE_AT: usize = 344;
-const SOCKINFO_TCP: i32 = 2;
-const TSI_S_LISTEN: i32 = 1;
+// no process table read elsewhere: no commands
+#[cfg(not(any(target_os = "macos", windows)))]
+fn scan() -> HashMap<(String, String), Found> {
+    HashMap::new()
+}
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct Command {
@@ -41,25 +35,30 @@ pub struct Command {
     pub hot_since: Option<f64>,
     pub memory: u64,
     pub ports: Vec<u16>,
+    // left running by a call that returned: no one waits for it
+    pub left: bool,
 }
 
+// a command's processes (none when its file is held but they could not be
+// named), with when the first started, their CPU time and when it was read (0
+// for as the look began), memory and ports; for one left running by a call
+// that returned, its file deleted (procs_win.rs), when it last wrote
 #[derive(Default)]
-struct Found {
-    pids: Vec<i32>,
-    started: f64,
-    cpu_ns: f64,
-    memory: u64,
-    ports: Vec<u16>,
-    path: String,
+pub struct Found {
+    pub pids: Vec<i32>,
+    pub started: f64,
+    pub cpu_ns: f64,
+    pub at: f64,
+    pub memory: u64,
+    pub ports: Vec<u16>,
+    pub path: String,
+    pub left: Option<f64>,
 }
 
-fn read_i32(buffer: &[u8], at: usize) -> i32 {
-    i32::from_ne_bytes(buffer[at..at + 4].try_into().expect("4 bytes"))
-}
-
-// "<session>/tasks/<id>.output" at the end of a path under claude-<uid>
-fn task_of(path: &str) -> Option<(String, String)> {
-    if !path.contains("/claude-") {
+// "<session>/tasks/<id>.output" at the end of a path under claude or claude-<uid>
+pub fn task_of(path: &str) -> Option<(String, String)> {
+    let path = path.replace('\\', "/");
+    if !path.split('/').any(|part| part == "claude" || part.starts_with("claude-")) {
         return None;
     }
     let mut parts = path.rsplit('/');
@@ -73,155 +72,66 @@ fn task_of(path: &str) -> Option<(String, String)> {
     (is_uuid && !id.is_empty()).then(|| (session.to_string(), id.to_string()))
 }
 
-fn pids() -> Vec<i32> {
-    // SAFETY: a null buffer asks for the count; the second call fills at most the buffer's size
-    let count = unsafe { libc::proc_listallpids(std::ptr::null_mut(), 0) };
-    if count <= 0 {
-        return Vec::new();
-    }
-    let mut pids = vec![0i32; count as usize + 64];
-    let bytes = (pids.len() * 4) as i32;
-    let n = unsafe { libc::proc_listallpids(pids.as_mut_ptr() as *mut c_void, bytes) };
-    pids.truncate(n.max(0) as usize);
-    pids.retain(|&p| p > 0);
-    pids
+// what the look before saw of each command: when, its CPU time, since when
+// hot, and the memory and ports it was last measured with
+struct Sample {
+    at: f64,
+    cpu_ns: f64,
+    hot_since: Option<f64>,
+    memory: u64,
+    ports: Vec<u16>,
 }
-
-fn task_info(pid: i32) -> Option<libc::proc_taskallinfo> {
-    let mut info: libc::proc_taskallinfo = unsafe { std::mem::zeroed() };
-    let size = std::mem::size_of::<libc::proc_taskallinfo>() as i32;
-    // SAFETY: the buffer is a proc_taskallinfo of the size given
-    let n = unsafe { libc::proc_pidinfo(pid, PROC_PIDTASKALLINFO, 0, &mut info as *mut _ as *mut c_void, size) };
-    (n == size).then_some(info)
-}
-
-fn fds(pid: i32) -> Vec<libc::proc_fdinfo> {
-    let size = std::mem::size_of::<libc::proc_fdinfo>();
-    let mut list: Vec<libc::proc_fdinfo> = vec![unsafe { std::mem::zeroed() }; 256];
-    loop {
-        let bytes = (list.len() * size) as i32;
-        // SAFETY: the buffer holds list.len() proc_fdinfo
-        let n = unsafe { libc::proc_pidinfo(pid, PROC_PIDLISTFDS, 0, list.as_mut_ptr() as *mut c_void, bytes) };
-        if n <= 0 {
-            return Vec::new();
-        }
-        if n < bytes || list.len() >= 1 << 16 {
-            list.truncate(n as usize / size);
-            return list;
-        }
-        list = vec![unsafe { std::mem::zeroed() }; list.len() * 4];
-    }
-}
-
-fn fd_info(pid: i32, fd: i32, flavor: i32, size: usize) -> Option<Vec<u8>> {
-    let mut buffer = vec![0u8; size];
-    // SAFETY: the buffer is as large as the flavor's struct
-    let n = unsafe { libc::proc_pidfdinfo(pid, fd, flavor, buffer.as_mut_ptr() as *mut c_void, size as i32) };
-    (n as usize == size).then_some(buffer)
-}
-
-fn path_of(pid: i32, fd: i32) -> Option<String> {
-    let buffer = fd_info(pid, fd, PROC_PIDFDVNODEPATHINFO, VNODE_PATH_SIZE)?;
-    let path = &buffer[VNODE_PATH_AT..];
-    let end = path.iter().position(|&b| b == 0).unwrap_or(path.len());
-    Some(String::from_utf8_lossy(&path[..end]).into_owned())
-}
-
-// a TCP socket that listens: its local port
-fn listening_port(pid: i32, fd: i32) -> Option<u16> {
-    let buffer = fd_info(pid, fd, PROC_PIDFDSOCKETINFO, SOCKET_SIZE)?;
-    let is_listening = read_i32(&buffer, SOCKET_KIND_AT) == SOCKINFO_TCP && read_i32(&buffer, SOCKET_TCP_STATE_AT) == TSI_S_LISTEN;
-    is_listening.then(|| u16::from_be(read_i32(&buffer, SOCKET_LPORT_AT) as u16))
-}
-
-#[repr(C)]
-struct Timebase {
-    numer: u32,
-    denom: u32,
-}
-
-extern "C" {
-    fn mach_timebase_info(info: *mut Timebase) -> i32;
-}
-
-// CPU time in the task info counts in mach ticks
-fn ticks_to_ns() -> f64 {
-    static RATIO: LazyLock<f64> = LazyLock::new(|| {
-        let mut info = Timebase { numer: 0, denom: 0 };
-        // SAFETY: fills the struct
-        unsafe { mach_timebase_info(&mut info) };
-        if info.denom == 0 { 1.0 } else { info.numer as f64 / info.denom as f64 }
-    });
-    *RATIO
-}
-
-// what the look before saw of each command: when, its CPU time, since when hot
-static LAST: LazyLock<Mutex<HashMap<String, (f64, f64, Option<f64>)>>> = LazyLock::new(Default::default);
+static LAST: LazyLock<Mutex<HashMap<String, Sample>>> = LazyLock::new(Default::default);
 
 // a look this short after the one before measures too little to say hot
 const MIN_SAMPLE_MS: f64 = 20_000.0;
 // most of a core
 const HOT: f64 = 0.8;
 
-pub fn commands(now: f64) -> Vec<Command> {
-    // SAFETY: no arguments
-    let uid = unsafe { libc::getuid() };
-    let ratio = ticks_to_ns();
-    let mut found: HashMap<(String, String), Found> = HashMap::new();
-    for pid in pids() {
-        let Some(info) = task_info(pid) else { continue };
-        if info.pbsd.pbi_uid != uid {
-            continue;
-        }
-        let list = fds(pid);
-        let mut tasks = Vec::new();
-        let mut ports = Vec::new();
-        for fd in &list {
-            match fd.proc_fdtype {
-                PROX_FDTYPE_VNODE => {
-                    if let Some(task) = path_of(pid, fd.proc_fd).and_then(|p| task_of(&p).map(|t| (t, p))) {
-                        if !tasks.iter().any(|(t, _): &((String, String), String)| t == &task.0) {
-                            tasks.push(task);
-                        }
-                    }
-                }
-                PROX_FDTYPE_SOCKET => ports.extend(listening_port(pid, fd.proc_fd)),
-                _ => {}
-            }
-        }
-        for (key, path) in tasks {
-            let one = found.entry(key).or_default();
-            let started = info.pbsd.pbi_start_tvsec as f64 * 1000.0 + info.pbsd.pbi_start_tvusec as f64 / 1000.0;
-            if one.pids.is_empty() || started < one.started {
-                one.started = started;
-            }
-            one.pids.push(pid);
-            one.cpu_ns += (info.ptinfo.pti_total_user + info.ptinfo.pti_total_system) as f64 * ratio;
-            one.memory += info.ptinfo.pti_resident_size;
-            one.ports.extend(&ports);
-            one.path = path;
-        }
-    }
+// the tests that look (sharing the looks before) take turns
+#[cfg(test)]
+pub static LOOKING: Mutex<()> = Mutex::new(());
 
-    let mut last = LAST.lock().expect("procs last");
+pub fn commands(now: f64) -> Vec<Command> {
+    sample(scan(), now)
+}
+
+// the commands of a look, each with its CPU since the look before
+fn sample(found: HashMap<(String, String), Found>, now: f64) -> Vec<Command> {
+    let mut last = LAST.lock().unwrap_or_else(PoisonError::into_inner);
     let mut seen = HashMap::new();
     let mut out = Vec::new();
     for ((session, id), mut one) in found {
         let key = format!("{session}/{id}");
-        let (cpu, hot_since, sample) = match last.get(&key) {
-            Some(&(at, cpu_ns, hot)) if now - at < MIN_SAMPLE_MS => (0.0, hot, (at, cpu_ns, hot)),
-            Some(&(at, cpu_ns, hot)) => {
-                let cpu = ((one.cpu_ns - cpu_ns) / 1e6 / (now - at)).max(0.0);
-                let hot = if cpu >= HOT { Some(hot.unwrap_or(at)) } else { None };
-                (cpu, hot, (now, one.cpu_ns, hot))
-            }
-            None => (0.0, None, (now, one.cpu_ns, None)),
-        };
-        seen.insert(key, sample);
         one.ports.sort_unstable();
         one.ports.dedup();
-        let last_output = std::fs::metadata(&one.path).map(|m| mtime_ms(&m)).unwrap_or(one.started);
-        out.push(Command { session, id, started: one.started, last_output, cpu, hot_since, memory: one.memory, ports: one.ports });
+        // the CPU over the time between its reads: a look that names holders
+        // reads some a while after it began
+        let at = if one.at > 0.0 { one.at } else { now };
+        let (cpu, hot_since, sample) = match last.remove(&key) {
+            // none of its processes named this time: nothing measured, the
+            // look before kept for the next that measures, and the memory and
+            // ports it saw
+            Some(s) if one.pids.is_empty() => {
+                (one.memory, one.ports) = (s.memory, s.ports.clone());
+                (0.0, s.hot_since, Some(s))
+            }
+            None if one.pids.is_empty() => (0.0, None, None),
+            Some(s) if at - s.at < MIN_SAMPLE_MS => (0.0, s.hot_since, Some(Sample { memory: one.memory, ports: one.ports.clone(), ..s })),
+            Some(s) => {
+                let cpu = ((one.cpu_ns - s.cpu_ns) / 1e6 / (at - s.at)).max(0.0);
+                let hot = if cpu >= HOT { Some(s.hot_since.unwrap_or(s.at)) } else { None };
+                (cpu, hot, Some(Sample { at, cpu_ns: one.cpu_ns, hot_since: hot, memory: one.memory, ports: one.ports.clone() }))
+            }
+            None => (0.0, None, Some(Sample { at, cpu_ns: one.cpu_ns, hot_since: None, memory: one.memory, ports: one.ports.clone() })),
+        };
+        if let Some(sample) = sample {
+            seen.insert(key, sample);
+        }
+        // never from 1970: a start not known is taken as now
+        let started = if one.started > 0.0 { one.started } else { now };
+        let last_output = one.left.or_else(|| std::fs::metadata(&one.path).ok().map(|m| mtime_ms(&m))).unwrap_or(started);
+        out.push(Command { session, id, started, last_output, cpu, hot_since, memory: one.memory, ports: one.ports, left: one.left.is_some() });
     }
     *last = seen;
     out.sort_by(|a, b| a.started.total_cmp(&b.started));
@@ -240,11 +150,61 @@ mod tests {
         assert_eq!(task_of("/private/tmp/claude-501/x/tasks/a.output"), None);
         assert_eq!(task_of(&format!("/tmp/other/{session}/tasks/a.output")), None);
         assert_eq!(task_of(&format!("/private/tmp/claude-501/p/{session}/tasks/a.log")), None);
+        let windows = format!(r"C:\Users\me\AppData\Local\Temp\claude\C--Users-me-shop\{session}\tasks\b1x2y3z4w.output");
+        assert_eq!(task_of(&windows), Some((session.to_string(), "b1x2y3z4w".to_string())));
+    }
+
+    // a look that names none of a command's processes measures nothing: no
+    // CPU then, nor a made-up burst after it (its whole CPU time as used
+    // meanwhile), the memory and ports as last measured, and never a start in 1970
+    #[test]
+    fn a_look_without_pids_keeps_the_sample() {
+        let _turn = LOOKING.lock().unwrap_or_else(PoisonError::into_inner);
+        let key = ("00000000-0000-4000-8000-0000000000aa".to_string(), "c".to_string());
+        let t0 = 1_792_000_000_000.0;
+        let measured = |cpu_s: f64| Found { pids: vec![1], started: t0 - 600_000.0, cpu_ns: cpu_s * 1e9, memory: 5 << 20, ports: vec![3000], ..Default::default() };
+        let unmeasured = || Found { started: t0 - 600_000.0, ..Default::default() };
+        sample(HashMap::from([(key.clone(), measured(300.0))]), t0);
+        let mid = sample(HashMap::from([(key.clone(), unmeasured())]), t0 + 30_000.0);
+        assert_eq!((mid[0].cpu, mid[0].memory, mid[0].ports.clone()), (0.0, 5 << 20, vec![3000]));
+        let after = sample(HashMap::from([(key.clone(), measured(301.0))]), t0 + 60_000.0);
+        assert!(after[0].cpu < 0.05, "{} cores", after[0].cpu);
+        assert_eq!(after[0].hot_since, None);
+        let untold = sample(HashMap::from([(key, Found::default())]), t0);
+        assert_eq!(untold[0].started, t0);
+    }
+
+    // a look that names holders reads a command's CPU a while after it began:
+    // the CPU is over the time between the reads, not between the looks' starts
+    #[test]
+    fn the_cpu_is_over_the_time_between_reads() {
+        let _turn = LOOKING.lock().unwrap_or_else(PoisonError::into_inner);
+        let key = ("00000000-0000-4000-8000-0000000000ab".to_string(), "c".to_string());
+        let t0 = 1_792_000_000_000.0;
+        let read = |cpu_s: f64, at: f64| Found { pids: vec![1], started: t0, cpu_ns: cpu_s * 1e9, at, ..Default::default() };
+        sample(HashMap::from([(key.clone(), read(100.0, t0))]), t0);
+        // begun 30 s on and read 10 s into it: 40 s of CPU in 40 s, one core
+        let then = sample(HashMap::from([(key, read(140.0, t0 + 40_000.0))]), t0 + 30_000.0);
+        assert!((then[0].cpu - 1.0).abs() < 1e-9, "{} cores", then[0].cpu);
+    }
+
+    // one left running by a call that returned is told so, its last output
+    // when its file was last written, its file having no name to look up
+    #[test]
+    fn what_a_call_left_running_is_told_so() {
+        let _turn = LOOKING.lock().unwrap_or_else(PoisonError::into_inner);
+        let key = ("00000000-0000-4000-8000-0000000000ac".to_string(), "c".to_string());
+        let t0 = 1_792_000_000_000.0;
+        let found = Found { pids: vec![1], started: t0, left: Some(t0 + 5_000.0), path: "gone.output".into(), ..Default::default() };
+        let left = sample(HashMap::from([(key, found)]), t0 + 10_000.0);
+        assert_eq!((left[0].left, left[0].last_output), (true, t0 + 5_000.0));
     }
 
     // a command of this very test: a child that holds such a file open and listens on a port
+    #[cfg(not(windows))]
     #[test]
     fn a_running_command_is_found_with_its_port() {
+        let _turn = LOOKING.lock().unwrap_or_else(PoisonError::into_inner);
         let session = "00000000-0000-4000-8000-000000000001";
         let dir = std::env::temp_dir().join(format!("claude-test/p/{session}/tasks"));
         std::fs::create_dir_all(&dir).expect("dir");
@@ -258,5 +218,36 @@ mod tests {
         assert!(me.memory > 0);
         drop((file, listener));
         let _ = std::fs::remove_dir_all(std::env::temp_dir().join("claude-test"));
+    }
+
+    // a command of this test: a child that holds such a file open and listens
+    // on a port, telling the port in the file (this process, the one asking,
+    // is never among the holders on Windows)
+    #[cfg(windows)]
+    #[test]
+    fn a_running_command_is_found_with_its_port() {
+        let _turn = LOOKING.lock().unwrap_or_else(PoisonError::into_inner);
+        let mut test = crate::procs_win::Fixture::new("port");
+        let session = "00000000-0000-4000-8000-000000000001";
+        let output = test.tasks("p", session).join("t1.output");
+        let listen = "$l = [Net.Sockets.TcpListener]::new([Net.IPAddress]::Loopback, 0); $l.Start(); \
+                      [Console]::Out.WriteLine($l.LocalEndpoint.Port); [Console]::Out.Flush(); Start-Sleep 30";
+        let child = std::process::Command::new("powershell")
+            .args(["-NoProfile", "-NonInteractive", "-Command", listen])
+            .stdout(std::fs::File::create(&output).expect("file"))
+            .spawn()
+            .expect("child");
+        test.children.push(child);
+        let port = (0..400)
+            .find_map(|_| {
+                std::thread::sleep(std::time::Duration::from_millis(50));
+                std::fs::read_to_string(&output).ok()?.trim().parse::<u16>().ok()
+            })
+            .expect("the child's port");
+        let found = sample(test.look(), crate::util::now_ms());
+        let it = found.iter().find(|c| c.session == session && c.id == "t1").expect("found");
+        assert!(it.ports.contains(&port), "{:?} lacks {port}", it.ports);
+        assert!(it.memory > 0);
+        assert!(!it.left, "found by its name: not left");
     }
 }

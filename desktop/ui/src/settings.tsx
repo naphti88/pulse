@@ -96,7 +96,7 @@ export function SettingsView({ onDone }: { onDone: () => void }) {
         </div>
       </div>
 
-      <span className="st-label st-section">Notifications on the Mac</span>
+      <span className="st-label st-section">Notifications</span>
 
       <table className="st-rules">
         <thead>
@@ -207,7 +207,7 @@ export function SettingsView({ onDone }: { onDone: () => void }) {
           on Mondays with the parked topics
         </label>
       </div>
-      <p className="st-note">Quiet hours are left to macOS Focus. The menu bar symbol and the panel always show everything; parked topics count nowhere.</p>
+      <p className="st-note">Quiet hours are left to the system's Focus or Do not disturb. The icon and the panel always show everything; parked topics count nowhere.</p>
     </div>
   )
 }

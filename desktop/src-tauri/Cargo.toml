@@ -9,6 +9,7 @@ rust-version = "1.80"
 tauri-build = { version = "2", features = [] }
 
 [dependencies]
+# macos-private-api has no effect off macOS; tauri-build wants it here to match the config
 tauri = { version = "2", features = ["tray-icon", "macos-private-api"] }
 tauri-plugin-autostart = "2"
 tauri-plugin-notification = "2"
@@ -18,9 +19,17 @@ notify = "8"
 rusty-leveldb = "3"
 png = "0.17"
 chrono = { version = "0.4", default-features = false, features = ["std", "clock"] }
+rusqlite = { version = "0.37", features = ["bundled"] }
+ruzstd = { version = "0.9", default-features = false, features = ["std"] }
+
+[target.'cfg(target_os = "macos")'.dependencies]
 libc = "0.2"
 objc2-app-kit = { version = "0.3", default-features = false, features = ["std", "NSRunningApplication", "NSWorkspace"] }
 objc2-foundation = { version = "0.3", default-features = false, features = ["std", "NSString"] }
+
+[target.'cfg(windows)'.dependencies]
+tauri-plugin-single-instance = "2"
+windows-sys = { version = "0.61", features = ["Wdk_Storage_FileSystem", "Win32_Foundation", "Win32_System_IO", "Win32_System_Threading", "Win32_System_ProcessStatus", "Win32_NetworkManagement_IpHelper", "Win32_Networking_WinSock", "Win32_Storage_FileSystem", "Win32_UI_Shell", "Win32_UI_WindowsAndMessaging"] }
 
 [profile.release]
 lto = true

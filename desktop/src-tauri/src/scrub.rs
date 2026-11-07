@@ -18,7 +18,7 @@ use crate::failed::Failed;
 use crate::items::Item;
 use crate::live::is_prompt;
 use crate::said::status_of;
-use crate::util::{home, parse_time, read_tail};
+use crate::util::{parse_time, read_tail};
 
 const ALLOWED: &str = include_str!("../testdata/allowed.json");
 // every case starts here: when a session ran is not part of it
@@ -26,7 +26,7 @@ const BASE: &str = "2026-01-01T00:00:00.000Z";
 const NOTHING: &str = "…";
 
 pub fn captures() -> Result<PathBuf, String> {
-    Ok(home()?.join("Library/Application Support/local.claude-dashboard.pulse/captures"))
+    Ok(crate::util::support_dir()?.join("captures"))
 }
 
 // a template of the list against a text: {n} stands for digits
@@ -429,7 +429,7 @@ use crate::failed::Failed;
             _ => None,
         };
         if let Some(id) = process {
-            inputs.commands.push(Command { session: name.into(), id, started: now, last_output: now, cpu: 0.0, hot_since: None, memory: 0, ports: Vec::new() });
+            inputs.commands.push(Command { session: name.into(), id, started: now, last_output: now, cpu: 0.0, hot_since: None, memory: 0, ports: Vec::new(), left: false });
         }
         // a case with an engine: the records of the processes are there, and say this
         if let Some(status) = case["engine"]["status"].as_str() {

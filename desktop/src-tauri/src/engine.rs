@@ -54,8 +54,31 @@ pub struct Engines {
     pub by_id: HashMap<String, Engine>,
 }
 
+#[cfg(unix)]
 fn is_alive(pid: i32) -> bool {
     pid > 0 && (unsafe { libc::kill(pid, 0) } == 0 || std::io::Error::last_os_error().raw_os_error() == Some(libc::EPERM))
+}
+
+// on Windows: a process that can be opened and has not exited; one that may
+// not be opened is there all the same
+#[cfg(windows)]
+fn is_alive(pid: i32) -> bool {
+    use windows_sys::Win32::Foundation::{CloseHandle, GetLastError, ERROR_ACCESS_DENIED, STILL_ACTIVE};
+    use windows_sys::Win32::System::Threading::{GetExitCodeProcess, OpenProcess, PROCESS_QUERY_LIMITED_INFORMATION};
+    if pid <= 0 {
+        return false;
+    }
+    // SAFETY: plain queries; the handle is closed before returning
+    unsafe {
+        let process = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, 0, pid as u32);
+        if process.is_null() {
+            return GetLastError() == ERROR_ACCESS_DENIED;
+        }
+        let mut code = 0u32;
+        let running = GetExitCodeProcess(process, &mut code) != 0 && code == STILL_ACTIVE as u32;
+        CloseHandle(process);
+        running
+    }
 }
 
 pub fn engines_in(dir: &Path, alive: impl Fn(i32) -> bool) -> Engines {

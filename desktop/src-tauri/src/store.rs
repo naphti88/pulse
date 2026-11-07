@@ -10,7 +10,7 @@ use std::sync::{LazyLock, Mutex};
 use serde::{Deserialize, Serialize};
 
 use crate::checks::Flag;
-use crate::util::{home, now_ms};
+use crate::util::{now_ms, support_dir};
 
 #[derive(Serialize, Deserialize, Clone, Copy, PartialEq, Eq, Debug)]
 #[serde(rename_all = "lowercase")]
@@ -87,7 +87,7 @@ static LOCKED: AtomicBool = AtomicBool::new(false);
 pub static STORE: LazyLock<Mutex<Store>> = LazyLock::new(|| Mutex::new(load()));
 
 fn path() -> Result<PathBuf, String> {
-    Ok(home()?.join("Library/Application Support/local.claude-dashboard.pulse/state.json"))
+    Ok(support_dir()?.join("state.json"))
 }
 
 pub fn problem() -> Option<String> {
@@ -140,13 +140,19 @@ pub fn save(store: &Store) -> Result<(), String> {
     save_to(store, &path()?)
 }
 
+// through a tmp file of this process's own: two Pulses saving at once (a dev
+// build beside the installed one) each move a whole file into place. A tmp
+// file a save could not move is removed
 fn save_to(store: &Store, path: &Path) -> Result<(), String> {
     if let Some(dir) = path.parent() {
         std::fs::create_dir_all(dir).map_err(|e| e.to_string())?;
     }
-    let tmp = path.with_extension("json.tmp");
-    std::fs::write(&tmp, serde_json::to_vec_pretty(store).map_err(|e| e.to_string())?).map_err(|e| e.to_string())?;
-    std::fs::rename(&tmp, path).map_err(|e| e.to_string())
+    let tmp = path.with_extension(format!("json.{}.tmp", std::process::id()));
+    let text = serde_json::to_vec_pretty(store).map_err(|e| e.to_string())?;
+    std::fs::write(&tmp, text).and_then(|()| std::fs::rename(&tmp, path)).map_err(|e| {
+        let _ = std::fs::remove_file(&tmp);
+        e.to_string()
+    })
 }
 
 #[cfg(test)]
@@ -157,6 +163,36 @@ mod tests {
         let dir = std::env::temp_dir().join(format!("pulse-store-{}-{name}", std::process::id()));
         std::fs::create_dir_all(&dir).expect("dir");
         dir
+    }
+
+    #[test]
+    fn a_save_leaves_another_pulses_save_alone_and_no_tmp_behind() {
+        let dir = folder("tmp");
+        let path = dir.join("state.json");
+        // another Pulse between its write and its rename: a build from before
+        // the tmp files of their own, and one after
+        let theirs = [dir.join("state.json.tmp"), dir.join(format!("state.json.{}.tmp", std::process::id() + 1))];
+        for tmp in &theirs {
+            std::fs::write(tmp, "{
+  \"marks\": {").expect("theirs");
+        }
+        let store = Store { is_started: true, panel_at: Some([100, 200]), ..Store::default() };
+        save_to(&store, &path).expect("save");
+        let (read, ok) = load_from(&path, 1);
+        assert!(ok.is_ok());
+        assert_eq!((read.is_started, read.panel_at), (true, Some([100, 200])));
+        for tmp in &theirs {
+            assert_eq!(std::fs::read_to_string(tmp).expect("theirs"), "{
+  \"marks\": {");
+        }
+        assert_eq!(std::fs::read_dir(&dir).expect("dir").count(), 3);
+
+        // a save that cannot be moved into place takes its tmp file with it
+        std::fs::remove_file(&path).expect("saved");
+        std::fs::create_dir(&path).expect("in the way");
+        assert!(save_to(&store, &path).is_err());
+        assert_eq!(std::fs::read_dir(&dir).expect("dir").count(), 3);
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]

@@ -25,12 +25,17 @@ fn reference(line: &str) -> Option<&str> {
     Some(rest.trim_end().strip_suffix(')').unwrap_or(rest))
 }
 
+// a line without the markdown it is set in, or the comment or reference it
+// sits in
+pub fn bare(line: &str) -> &str {
+    let line = line.trim_start_matches([' ', '\t', '>', '*', '_', '`']);
+    reference(line).or_else(|| line.strip_prefix("<!--")).unwrap_or(line).trim_start()
+}
+
 // one line of an answer: as asked for, as an HTML comment, as a plain line
 // or set in markdown
 fn status_line(line: &str) -> Option<Said> {
-    let line = line.trim_start_matches([' ', '\t', '>', '*', '_', '`']);
-    let line = reference(line).or_else(|| line.strip_prefix("<!--")).unwrap_or(line).trim_start();
-    let rest = line.strip_prefix("STATUS:")?.trim_start();
+    let rest = bare(line).strip_prefix("STATUS:")?.trim_start();
     let (name, state) = Word::ALL.into_iter().find(|(name, _)| {
         rest.get(..name.len()).is_some_and(|word| word.eq_ignore_ascii_case(name)) && !rest[name.len()..].starts_with(|c: char| c.is_alphanumeric())
     })?;
