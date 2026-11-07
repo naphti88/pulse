@@ -208,6 +208,13 @@ across all sessions and says what burns, what needs you, what only runs and what
 can wait, with what each topic was about and how the topics depend on each other.
 It is always the same structure, changes nothing, and you go on in the sessions.
 
+`/roundup deep` reads everything and checks it against the facts, for the start
+of the week or when nothing is clear any more. It takes minutes and keeps what it
+found in `~/.claude/roundup/last-deep.md`, on this Mac only. `/roundup` builds on
+that and reads only what changed since, so that dates and connections found by a
+deep run are not lost. It says how old that run is, and asks for a new one after
+three days.
+
 The skill lives in `tools/roundup`. Pulse decides what is open: at every refresh
 it writes `open-items.json`, with your marks taken into account, and with the
 sessions you closed in the last 7 days although they still asked something.
