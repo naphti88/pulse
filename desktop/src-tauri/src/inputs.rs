@@ -16,7 +16,7 @@ use crate::live::{live_of, Live};
 use crate::pending::{pending_in, Pending};
 use crate::procs::{commands, Command};
 use crate::rules::limits::{ACTIVE_MS, LIVE_MS, PATIENCE_MS, WINDOW_MS};
-use crate::rules::SHELL;
+use crate::rules::{Word, SHELL};
 use crate::said::{said_of, Said};
 use crate::running::is_running;
 use crate::runs::{RunRecord, Summary};
@@ -431,12 +431,51 @@ pub fn load_inputs() -> Result<Inputs, String> {
                 .collect()
         }
     };
+    keep_open(&mut inputs, &p.projects);
     Ok(inputs)
+}
+
+// sessions long quiet are not read any more, but what they left open must not
+// get lost: a question or a block, or the answer of a chat nobody read
+fn keep_open(inputs: &mut Inputs, projects: &Path) {
+    let now = inputs.now;
+    let quiet: Vec<(String, String, Option<String>, bool)> = inputs
+        .sessions
+        .iter()
+        .filter(|s| !s.archived && s.last_activity.unwrap_or(0.0) <= now - ACTIVE_MS)
+        .filter_map(|s| Some((s.id.clone(), s.cli_id.clone()?, s.cwd.clone(), s.task_id.is_none())))
+        .collect();
+    for (id, cli_id, cwd, is_chat) in quiet {
+        let Some(path) = transcript_of(projects, &cli_id, cwd.as_deref()) else { continue };
+        let Some(said) = said_of(&path) else { continue };
+        if still_open(said.state, is_chat, inputs.unread.contains(&id)) {
+            inputs.said.insert(id, said);
+        }
+    }
+}
+
+fn still_open(word: Word, is_chat: bool, unread: bool) -> bool {
+    match word {
+        Word::Waiting | Word::Blocked => true,
+        Word::Worked => is_chat && unread,
+        _ => false,
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn what_stays_of_a_session_long_quiet() {
+        assert!(still_open(Word::Waiting, false, false));
+        assert!(still_open(Word::Blocked, true, false));
+        assert!(still_open(Word::Worked, true, true));
+        // read, or a routine's result nobody will come back to
+        assert!(!still_open(Word::Worked, true, false));
+        assert!(!still_open(Word::Worked, false, true));
+        assert!(!still_open(Word::Idle, true, true));
+    }
 
     #[test]
     fn a_report_stands_until_something_says_it_is_over() {

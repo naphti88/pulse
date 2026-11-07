@@ -177,7 +177,8 @@ fn item_of(s: &Session, input: &Inputs, records: &HashMap<&str, &RunRecord>, tas
         running: input.running.contains(&s.id),
         in_turn: input.in_turn.contains(&s.id),
         record_open: run.as_ref().is_some_and(|r| r.record_open),
-        word: if kind == Kind::Chat { said.map(|said| said.state) } else { run.as_ref().and_then(|r| r.word) },
+        // a run whose record is gone has only its transcript left
+        word: if kind == Kind::Chat || rec.is_none() { said.map(|said| said.state) } else { run.as_ref().and_then(|r| r.word) },
         needs_person: matches!(last_said, Some(Word::Waiting | Word::Blocked | Word::Parked)),
         has_record: rec.is_some(),
         refused: run.as_ref().is_some_and(|r| r.refused),
@@ -196,7 +197,10 @@ fn item_of(s: &Session, input: &Inputs, records: &HashMap<&str, &RunRecord>, tas
 
     let activity = s.last_activity.unwrap_or(0.0);
     let (started_at, last_activity, words) = match &run {
-        Some(run) => (run.started_at, run.last_activity, run.reason(state, &s.summary)),
+        Some(run) => {
+            let left = said.filter(|_| rec.is_none()).map(|said| said.text.clone());
+            (run.started_at, run.last_activity, left.unwrap_or_else(|| run.reason(state, &s.summary)))
+        }
         None => (s.created_at.unwrap_or(activity), activity, s.summary.words(said.map(|said| said.text.clone()))),
     };
     let approval = evidence.engine_approval.as_ref().or(evidence.pending.as_ref()).or(evidence.awaiting.as_ref());
@@ -292,8 +296,13 @@ pub fn build(input: &Inputs, store: &Store, tz: i64) -> Snapshot {
     let mut items: Vec<Item> = input
         .sessions
         .iter()
-        // a parked topic stays, however old, archived or not
-        .filter(|s| input.running.contains(&s.id) || store.parked.contains_key(&s.id) || (!s.archived && s.last_activity.unwrap_or(0.0) > now - WINDOW_MS))
+        // a parked topic stays, however old, archived or not; so does what was
+        // left open: past the window its word is only read if it still counts
+        // (inputs::keep_open)
+        .filter(|s| {
+            let recent = s.last_activity.unwrap_or(0.0) > now - WINDOW_MS;
+            input.running.contains(&s.id) || store.parked.contains_key(&s.id) || (!s.archived && (recent || input.said.contains_key(&s.id)))
+        })
         .map(|s| item_of(s, input, &records, &tasks, store))
         .collect();
     items.sort_by(|a, b| b.since.total_cmp(&a.since));
@@ -474,6 +483,39 @@ mod tests {
         let b = snap.items.iter().find(|i| i.id == "b").unwrap();
         assert_eq!(b.stage, Stage::Done);
         assert_eq!(snap.counts.review, 1);
+    }
+
+    fn said(state: Word, text: &str) -> Said {
+        Said { state, text: text.into() }
+    }
+
+    #[test]
+    fn what_was_left_open_stays_however_old() {
+        let old = NOW - 40.0 * DAY as f64;
+        let mut input = inputs(vec![session("asks", old), session("forgotten", old)], vec![], vec![]);
+        input.said.insert("asks".into(), said(Word::Waiting, "Was soll ich tun?"));
+        let snap = build(&input, &Store::default(), 60);
+        assert_eq!(snap.items.len(), 1);
+        assert_eq!((snap.items[0].state, snap.items[0].stage), (State::Waiting, Stage::Open));
+        assert_eq!(snap.items[0].reason, "Was soll ich tun?");
+
+        // set aside it stays too, closed it is settled
+        let mut store = Store::default();
+        store.marks.insert("asks".into(), Mark { kind: MarkKind::Seen, at: NOW, shown: None });
+        assert_eq!(build(&input, &store, 60).items[0].stage, Stage::Follow);
+        store.marks.insert("asks".into(), Mark { kind: MarkKind::Done, at: NOW, shown: None });
+        assert_eq!(build(&input, &store, 60).items[0].stage, Stage::Done);
+    }
+
+    #[test]
+    fn a_run_left_open_stays_when_its_record_is_gone() {
+        let mut ses = session("r", NOW - 40.0 * DAY as f64);
+        ses.task_id = Some("daily".into());
+        let mut input = inputs(vec![ses], vec![], vec![task("daily", "0 7 * * *")]);
+        input.said.insert("r".into(), said(Word::Waiting, "Soll ich das freigeben?"));
+        let snap = build(&input, &Store::default(), 60);
+        assert_eq!((snap.items[0].state, snap.items[0].stage), (State::Waiting, Stage::Open));
+        assert_eq!(snap.items[0].reason, "Soll ich das freigeben?");
     }
 
     #[test]

@@ -7,6 +7,7 @@ mod checks;
 mod cron;
 mod drift;
 mod engine;
+mod export;
 mod failed;
 mod front;
 mod history;
@@ -93,6 +94,9 @@ fn refresh(app: &AppHandle) {
             if let Err(error) = save(&store) {
                 eprintln!("store: {error}");
             }
+        }
+        if let Err(error) = export::write(&snap, &store) {
+            eprintln!("export: {error}");
         }
     }
     // a hidden panel gets the snapshot when it is shown again

@@ -20,12 +20,17 @@ https://github.com/user-attachments/assets/b85c4ad9-4e7a-4367-b419-6594073a9225
   as you set them; a click opens the session.
 - Park a topic for later, mark things done or read, move the panel anywhere
   or shrink it to a bar of the counts; light and dark.
+- **Roundup:** `/roundup` in Claude reads across all sessions when you have lost
+  track and says what burns, what needs you, what can wait and how the topics
+  depend on each other. See [`desktop/README.md`](desktop/README.md#roundup).
+- **Decision cards:** an answer that needs you ends with a short card that can
+  be understood without reading back.
 
 It has two parts:
 
 | Part | What it does |
 | --- | --- |
-| [`routine-recorder`](routine-recorder) | A Claude Code plugin. It asks every session to end its answers with a `STATUS:` line (worked, waiting, blocked, idle, parked), which the app then does not show, records each scheduled-routine run to `~/.claude/routine-recorder/runs` and reports what waits for your approval and which API error ended a turn. |
+| [`routine-recorder`](routine-recorder) | A Claude Code plugin. It asks every session to end its answers with a `STATUS:` line (worked, waiting, blocked, idle, parked), which the app then does not show, and with a decision card when it needs you, records each scheduled-routine run to `~/.claude/routine-recorder/runs` and reports what waits for your approval and which API error ended a turn. |
 | [`desktop`](desktop) | Pulse itself, a Tauri app. It reads the sessions of the Claude desktop app, their transcripts and the records of the plugin. |
 
 ## Requirements
@@ -106,7 +111,8 @@ anywhere.
   process table (for the commands sessions run) and `git` in the folders recent
   sessions worked in (to see work that has not landed). It never fetches, commits
   or pushes.
-- **Writes:** its own state and settings in
+- **Writes:** its own state, its settings and a list of what is open (for
+  `/roundup`) in
   `~/Library/Application Support/local.claude-dashboard.pulse/`; the plugin
   writes its records to `~/.claude/routine-recorder/runs` and what waits for
   you, by the name of a tool only, to `~/.claude/routine-recorder/pending`.

@@ -48,6 +48,8 @@ pub mod limits {
     pub const ACTIVE_MS: f64 = 7.0 * DAY_MS;
     // sessions older than this are left out, unless they still run
     pub const WINDOW_MS: f64 = 14.0 * DAY_MS;
+    // how long a session closed with its question unanswered is named to /roundup
+    pub const CLOSED_OPEN_MS: f64 = 7.0 * DAY_MS;
     // activity this soon after parking still belongs to it (the app writes a title, a summary)
     pub const PARK_GRACE_MS: f64 = 60_000.0;
     // activity this soon after what was on screen when it was marked still belongs to it

@@ -1,7 +1,7 @@
 import { expect, mock, test } from 'claude-code/testing'
 import type { On } from 'claude-code'
 
-import { withoutStatus, type RunRecord } from '../hooks/register'
+import { statusPrompt, withoutStatus, type RunRecord } from '../hooks/register'
 
 const FILE = '/home/t/.claude/routine-recorder/runs/s1.json'
 
@@ -202,4 +202,14 @@ test('a call the engine sends to be asked for is told, for the app to ask in its
 
   await $.tool.call({ tool: 'mcp__Claude_Browser__preview_start', tool_use_id: 'u1' })
   expect(pendingOf(files)).toEqual([])
+})
+
+test('an answer that needs the person brings a card that stands on its own', async () => {
+  for (const isRoutine of [true, false]) {
+    const prompt = statusPrompt(isRoutine)
+    expect(prompt).toContain('decision card before the STATUS line')
+    for (const field of ['What it is about', 'To decide', 'Proposal', 'If nothing happens', 'Urgency', 'Importance', 'Connected with']) {
+      expect(prompt).toContain(`- ${field}:`)
+    }
+  }
 })

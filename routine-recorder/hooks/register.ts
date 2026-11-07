@@ -86,6 +86,20 @@ const TAIL = 600
 const MAX_TURNS = 200
 const MAX_PER_TURN = 50
 
+// An answer that needs the person ends with a card that stands on its own:
+// they come to it from another project and must not have to read back. The
+// /roundup skill (tools/roundup) reads the same fields.
+const DECISION_CARD = [
+  'When the answer ends as waiting or blocked, put a decision card before the STATUS line. The person comes to it from another project and has forgotten the context: it must be understood without reading anything above it. Write the labels and the content in the user\'s language and keep exactly these seven lines, one line each, under a bold heading:',
+  '- What it is about: the project and the topic, with the background in one or two sentences',
+  '- To decide: the one thing the person has to decide or do',
+  '- Proposal: your recommendation',
+  '- If nothing happens: what happens or stays as it is',
+  '- Urgency: high, medium or low, with the reason or the date',
+  '- Importance: high, medium or low, with the reason',
+  '- Connected with: the sessions, PRs or plans this depends on or that depend on it, or that none are known',
+]
+
 // Every session ends its answers with a STATUS line, which Pulse reads
 // from the transcript (a chat) or from the record (a routine run). worked is a
 // result the person only reads; waiting stays open after they read it
@@ -102,6 +116,7 @@ export function statusPrompt(isRoutine: boolean): string {
     'blocked: you could not do the work (a permission was refused, access or a tool was missing, an error stopped you).',
     'idle: there was nothing to do.',
     'parked: the user asked to set this topic aside for later (to park it). Before the STATUS line, sum up in a few lines where it stands and what the next step would be; the sentence says that in short. Only when the user asks for it.',
+    ...DECISION_CARD,
     ...(isRoutine
       ? [
           'If during this answer you notified anyone outside this chat (push notification, Discord, Slack, email, a message sent through an API), put a line "PING: <who and what>" directly before the STATUS line, after the empty line.',

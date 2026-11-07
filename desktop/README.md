@@ -108,7 +108,15 @@ subagent) is running: it waits for that work and goes on when it is done;
 unless its last answer said it waits for you, is blocked or parked, which
 comes first (the command shows under *Commands to check*). An
 item that changes after a mark is open again. Items without activity for 14
-days drop out.
+days drop out, unless they were left open: a question, a block or the unread
+answer of a chat stays, however old, until it is closed or archived. A session
+quiet for more than 7 days is read only for that.
+
+An answer that ends as waiting or blocked brings a decision card before its
+STATUS line, in the user's language: what it is about, what to decide, the
+proposal, what happens if nothing happens, urgency, importance and what it is
+connected with. It is written for someone coming from another project, so that
+they need not read back. The plugin asks for it with the STATUS line.
 
 ## Work that has not landed
 
@@ -193,6 +201,23 @@ archived, and as a note when the app no longer keeps the session. A click
 opens the session to look at it and it stays parked; it ends when the session
 goes on or with *Unpark*, which puts it back in *Open*.
 
+## Roundup
+
+For the moment you have lost track: `/roundup`, in a session of its own, reads
+across all sessions and says what burns, what needs you, what only runs and what
+can wait, with what each topic was about and how the topics depend on each other.
+It is always the same structure, changes nothing, and you go on in the sessions.
+
+The skill lives in `tools/roundup`. Pulse decides what is open: at every refresh
+it writes `open-items.json`, with your marks taken into account, and with the
+sessions you closed in the last 7 days although they still asked something.
+Claude reads those sessions, ranks them and finds what connects them. To have the
+command, link the folder once:
+
+```bash
+ln -sfn "$PWD/tools/roundup" ~/.claude/skills/roundup
+```
+
 ## What it reads and writes
 
 - the Claude app's sessions and scheduled tasks
@@ -212,7 +237,8 @@ goes on or with *Unpark*, which puts it back in *Open*.
 It writes only its own state (marks, parked topics, what was notified, the
 last summary) to
 `~/Library/Application Support/local.claude-dashboard.pulse/state.json`, the
-settings to `settings.json` beside it and cases you save to `captures/` there, and
+settings to `settings.json` beside it, what is open to `open-items.json` beside
+it (for `/roundup`, below) and cases you save to `captures/` there, and
 opens chats through `claude://` links. A file watcher (FSEvents) triggers a
 refresh, changes are gathered for 3 s; a 30 s tick catches what time alone
 changes.
